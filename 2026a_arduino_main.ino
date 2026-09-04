@@ -49,19 +49,6 @@ MotorNode motorNodes[] = {
   {0, 1, 0, 0, 0, 14}//エアシリンダー左右調整＿左
 };
 
-//*****トグルボタン*****
-struct ToggleButtonCommand {
-  ButtonEnum button;
-  byte funcCode;
-  byte targetNode;
-};
-
-//*****トグルコマンドの初期化*****
-ToggleButtonCommand toggleCommands[] {
-  {CROSS, 0x01, 0},
-  {TRIANGLE, 0x01, 1}
-};
-
 //*****オムニの構造体*****
 struct OmniWheel {
   float vxCoef;
@@ -123,35 +110,6 @@ HoldButtonCommand holdCommands[] {
   {L2, true, LEFT, 0x01, 16, -150}  //エアシリンダー左右調整_左:左方へ
 };
 
-//*****角度制御用(引き)の構造体*****
-struct AngleButtonCommand {
-  ButtonEnum modifier;
-  ButtonEnum button;
-  float targetAngle;
-  int maxSpeed;
-  byte targetNode;
-  byte funcCode;
-};
-
-//*****初期化*****
-AngleButtonCommand angleCommands[] {
-  {R2, CIRCLE, 0.0, 0, 0, 0}, //targetNodeとfuncCodeは不明
-  {L2, CIRCLE, 0.0, 0, 0, 0}  //同上
-};
-
-//*****角度制御用（発射）の構造体*****
-struct AngleReleaseButtonCommand {
-  ButtonEnum modifier;
-  ButtonEnum button;
-  byte targetNode;
-  byte funcCode;
-};
-
-//*****初期化*****
-AngleReleaseButtonCommand angleReleaseCommands[] {
-  {R2, SQUARE, 0, 0},
-  {L2, SQUARE, 0, 0}
-};
 
 /**************************************************************************************************/
 //変数定義・初期化
@@ -159,9 +117,6 @@ AngleReleaseButtonCommand angleReleaseCommands[] {
 
 //*****モーターの数を臨機応変に*****
 const byte motorNodesCount = sizeof(motorNodes) / sizeof(motorNodes[0]);
-
-//*****トグルボタンの数を臨機応変に*****
-const byte toggleCommandsCount = sizeof(toggleCommands) / sizeof(toggleCommands[0]);
 
 //*****オムニ臨機応変（仮）*****
 const byte omniCount = sizeof(omni) / sizeof(omni[0]);
@@ -171,12 +126,6 @@ const byte pulseCommandsCount = sizeof(pulseCommands) / sizeof(pulseCommands[0])
 
 //*****hold機構の数を臨機応変に*****
 const byte holdCommandsCount = sizeof(holdCommands) / sizeof(holdCommands[0]);
-
-//*****angleの機構の数を臨機応変に*****
-const byte angleCommandsCount = sizeof(angleCommands) / sizeof(angleCommands[0]);
-
-//*****angleの機構の数を臨機応変に*****
-const byte angleReleaseCommandsCount = sizeof(angleReleaseCommands) / sizeof(angleReleaseCommands[0]);
 
 //*****MCP2515とSPI通信のための宣言*****
 const byte CAN_CS_PIN = 53;
@@ -264,9 +213,6 @@ const byte stickDeadZone = 18;
 /**************************************************************************************************/
 //配列
 /**************************************************************************************************/
-
-//*****トグルボタンが押される前の状態*****
-bool toggleCommandsStates[toggleCommandsCount] = {false};
 
 //*****生のRPMの値*****
 float rawRPM[omniCount];
@@ -379,52 +325,6 @@ void allSystemOff(void) {
     Serial.println("CAN FAILS.SYSTEMOFF SKIPPED");
     return;
   }
-
-  //TOGGLE用
-  for (int i = 0; i < toggleCommandsCount; i++) {
-    if (!canReady) {
-      break;
-    }
-    if (!toggleCommandsStates[i]) {
-      continue;
-    }
-    byte targetNode = toggleCommands[i].targetNode;
-    byte funcCode = toggleCommands[i].funcCode;
-    unsigned long canId;
-    if (!resolveCanId(targetNode, funcCode, canId)) {
-      continue;
-    }
-    byte data[8] = {1, 0, 0, 0, 0, 0, 0, 0};
-    if (canSendChecker(canId, data)) {
-      Serial.println("TOGGLE SYSTEMOFF SEND SUCCESS.");
-      toggleCommandsStates[i] = false;
-    } else {
-      Serial.println("TOGGLE SYSTEMOFF SEND FAILED");
-    }
-  }
-
-  //HOLD用
-  for (int i = 0; i < holdCommandsCount; i++) {
-    if (!canReady) {
-      break;
-    }
-    if (!holdCommandsStates[i]) {
-      continue;
-    }
-    byte targetNode = holdCommands[i].targetNode;
-    byte funcCode = holdCommands[i].funcCode;
-    unsigned long canId;
-    if (!resolveCanId(targetNode, funcCode, canId)) {
-      continue;
-    }
-    byte data[8] = {1, 0, 0, 0, 0, 0, 0, 0};
-    if (canSendChecker(canId, data)) {
-      Serial.println("HOLD SYSTEMOFF SEND SUCCESS");
-      holdCommandsStates[i] = false;
-    } else {
-      Serial.println("HOLD SYSTEMOFF SEND FAILED");
-    }
-  }
 }
 
 //*****コントローラ切断時継続送信*****
@@ -475,42 +375,6 @@ void ReSendINIT(void) {
     if ((unsigned long)(millis() - lastINITSendTime) >= INITSendInterval) {
       lastINITSendTime = millis();
       sendINIT();
-    }
-  }
-}
-
-//*****エアシリンダーON/OFFボタン（仮）*****
-void checkToggleButtons(void) {
-  for (int i = 0; i < toggleCommandsCount; i++) {    
-    if (readStateChecker(toggleCommands[i].button)) {
-      continue;
-    }
-    bool toggleClicked = PS4.getButtonClick(toggleCommands[i].button);
-    if (!canReady) {
-      Serial.println("CAN FAILS. TOGGLE SEND SKIPPED");
-    } else {
-      if (toggleClicked) {
-        bool nextState = !toggleCommandsStates[i];
-        int sendValue;
-        if (nextState == false) {
-          sendValue = 0;
-        } else {
-          sendValue = airMaxValue;
-        }
-        byte targetNode = toggleCommands[i].targetNode;
-        byte funcCode = toggleCommands[i].funcCode;
-        unsigned long canId;
-        if (!resolveCanId(targetNode, funcCode, canId)) {
-          continue;
-        }
-        byte data[8] = {1, (byte)((sendValue >> 8) & 0xFF), (byte)(sendValue & 0xFF), 0, 0, 0, 0, 0};
-        if (canSendChecker(canId, data)) {
-          Serial.println("CAN SEND SUCCESS");
-          toggleCommandsStates[i] = nextState;
-        } else {
-          Serial.println("CAN SEND FAILED");
-        }
-      }
     }
   }
 }
@@ -791,48 +655,6 @@ void checkHoldButtons(void) {
   }
 }
 
-//*****角度制御（引き）*****
-void checkAngleButtons(void) {
-  bool CIRCLEPressed = PS4.getButtonClick(CIRCLE);
-  for (int i = 0; i < angleCommandsCount; i++) {
-    if (!canReady) {
-      Serial.println("CAN FAILS. ANGLE SEND SKIPPED");
-      continue;
-    } else {
-      bool useModifier = PS4.getButtonPress(angleCommands[i].modifier);
-      if (useModifier && CIRCLEPressed) {
-        //CAN送信は不明！
-        sendAngleCAN(i);
-      }
-    }
-  }
-}
-
-void sendAngleCAN(byte index) { 
-  
-}
-
-//*****角度制御（放す）*****
-void checkAngleReleaseButtons(void) {
-  bool SQUAREPressed = PS4.getButtonClick(SQUARE);
-  for (int i = 0; i < angleReleaseCommandsCount; i++) {
-    if (!canReady) {
-      Serial.println("CAN FAILS. ANGLE RELEASE SEND SKIPPED");
-      continue;
-    } else {
-      bool useModifier = PS4.getButtonPress(angleReleaseCommands[i].modifier);
-      if (useModifier && SQUAREPressed) {
-        sendReleaseAngleCAN(i);
-      }
-    }
-  }
-}
-
-//*****リリースCAN送信*****
-void sendReleaseAngleCAN(byte index) {
-  
-}
-
 //*****非常停止*****
 void emergencyStop(void) {
   bool psClicked = PS4.getButtonClick(PS);
@@ -969,11 +791,8 @@ void loop() {
     return;
   }
 
-  checkToggleButtons();
   checkPulseButtons();
   checkHoldButtons();
-  checkAngleButtons();
-  checkAngleReleaseButtons();
 
   float vx = readStickRawValue(PS4.getAnalogHat(RightHatX), false);
   float vy = readStickRawValue(PS4.getAnalogHat(RightHatY), true);
