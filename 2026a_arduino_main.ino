@@ -13,6 +13,7 @@ const int pulseMaxValue = 1000;
 USB Usb;
 BTD Btd(&Usb);
 PS4BT PS4(&Btd);
+PS4BT PS4_2(&Btd);
 
 /**************************************************************************************************/
 //構造体定義・初期化
@@ -30,23 +31,18 @@ struct MotorNode {
 
 //*****機構の構造体の配列の初期化・代入*****
 MotorNode motorNodes[] = {
-  {0, 1, 0, 0, 0, 0},//マブチ想定（エアシリンダー），PWM（UFOキャッチ）
-  {0, 1, 0, 0, 0, 0},//マブチ想定（エアシリンダー），PWM（スタック上下）
-  {0, 1, 0, 0, 0, 0},//マブチ想定（エアシリンダー），PWM（エア発射）
-  {1, 3, 0, 0, 0, 0},//FL:
-  {1, 3, 0, 0, 0, 1},//FR:
-  {1, 3, 0, 0, 1, 2},//RR:
-  {1, 3, 0, 0, 1, 3},//RL:
-  {0, 1, 0, 0, 0, 4},//マブチ，PWM（投射機LAUNCH R）
-  {0, 1, 0, 0, 0, 6},//マブチ，PWM（投射機LAUNCH L）
-  {0, 1, 0, 0, 0, 7},//マブチ，PWM（エア発射R=AIR_PROJECTION_LAUNCH R）
-  {0, 1, 0, 0, 0, 8},//マブチ，PWM（エア発射L=AIR_PROJECTION_LAUNCH L）
-  {0, 1, 0, 0, 0, 9},//マブチ，PWM（バケツリフト）
-  {0, 1, 0, 0, 0, 10},//UFO左右
-  {0, 1, 0, 0, 0, 11},//雑巾のせ台＿右:昇降
-  {0, 1, 0, 0, 0, 12},//雑巾のせ台＿左:昇降
-  {0, 1, 0, 0, 0, 13},//エアシリンダー左右調整＿右
-  {0, 1, 0, 0, 0, 14}//エアシリンダー左右調整＿左
+  {1, 3, 0, 0, 0, 0},//FL
+  {1, 3, 0, 0, 0, 1},//FR
+  {1, 3, 0, 0, 0, 2},//RR
+  {1, 3, 0, 0, 0, 3},//RL
+  {0, 1, 0, 0, 1, 0},//2X_FL
+  {0, 1, 0, 0, 1, 1},//2X_FR
+  {0, 1, 0, 0, 1, 2},//2X_RR
+  {0, 1, 0, 0, 1, 3},//2X_RL
+  {0, 1, 0, 0, 1, 4},//4X_R
+  {0, 1, 0, 0, 1, 5},//4X_L
+  {0, 1, 0, 0, 2, 0},//バケツ（モーター）
+  {0, 1, 0, 0, 2, 1},//バケツ（エアー？）
 };
 
 //*****オムニの構造体*****
@@ -60,17 +56,15 @@ struct OmniWheel {
 
 //*****オムニ初期化*****
 OmniWheel omni[] {
-  {0.7071f, 0.7071f, 1.0f, 3, "FL"},
-  {0.7071f, -0.7071f, 1.0f, 4, "FR"},
-  {-0.7071f, -0.7071f, 1.0f, 5, "RR"},
-  {-0.7071f, 0.7071f, 1.0f, 6, "RL"}
+  {0.7071f, 0.7071f, 1.0f, 0, "FL"},
+  {0.7071f, -0.7071f, 1.0f, 1, "FR"},
+  {-0.7071f, -0.7071f, 1.0f, 2, "RR"},
+  {-0.7071f, 0.7071f, 1.0f, 3, "RL"}
 };
 
 //*****エアシリンダー用の構造体*****
 struct PulseButtonCommand {
-  ButtonEnum modifier1;          //修飾ボタン1
-  ButtonEnum modifier2;          //修飾ボタン2（修飾が1つでいい場合はmodifier1と同じ値を入れる）
-  ButtonEnum button;             //クリックするボタン
+  ButtonEnum button;         
   byte funcCode;
   byte targetNode;
   int pulseValue;
@@ -79,37 +73,13 @@ struct PulseButtonCommand {
 
 //*****エアシリンダー用構造体の初期化*****
 PulseButtonCommand pulseCommands[] {
-  {R2, R2, CROSS,    0x01, 7,  pulseMaxValue, 300},  //投射機LAUNCH R
-  {L2, L2, CROSS,    0x01, 8,  pulseMaxValue, 300},  //投射機LAUNCH L
-  {R2, R2, CIRCLE,   0x01, 9,  pulseMaxValue, 200},  //エア発射R
-  {L2, L2, CIRCLE,   0x01, 10, pulseMaxValue, 200},  //エア発射L
-  {R2, L2, TRIANGLE, 0x01, 11, pulseMaxValue, 500}   //バケツリフト（R2とL2両方）
+  {TRIANGLE,  0x01, 4, pulseMaxValue, 300},  //2X_FL
+  {CROSS,     0x01, 5, pulseMaxValue, 300},  //2X_FR
+  {SQUARE,    0x01, 6, pulseMaxValue, 300},  //2X_RR
+  {CIRCLE,    0x01, 7, pulseMaxValue, 300},  //2X_RL
+  {R1,        0x01, 8, pulseMaxValue, 300},  //4X_R
+  {L1,        0x01, 9, pulseMaxValue, 300},  //4X_L
 };
-
-//*****押している間のみ動くボタンの構造体*****
-struct HoldButtonCommand {
-  ButtonEnum modifier;
-  bool useModifier;
-  ButtonEnum button;
-  byte funcCode;
-  byte targetNode;
-  int sendValue;  
-};
-
-//*****初期化*****
-HoldButtonCommand holdCommands[] {
-  {R2, false, R1, 0x01, 12, 320},   //UFO右
-  {L2, false, L1, 0x01, 12, -320},  //UFO左
-  {R2, true, UP, 0x01, 13, 320},    //カタパルト雑巾のせ部分_右:上昇
-  {R2, true, DOWN, 0x01, 13, -320}, //カタパルト雑巾のせ部分_右:下降
-  {L2, true, UP, 0x01, 14, 320},    //カタパルト雑巾のせ部分_左:上昇
-  {L2, true, DOWN, 0x01, 14, -320}, //カタパルト雑巾のせ部分_左:下降
-  {R2, true, RIGHT, 0x01, 15, 150}, //エアシリンダー左右調整_右:右方へ
-  {R2, true, LEFT, 0x01, 15, -150}, //エアシリンダー左右調整_右:左方へ
-  {L2, true, RIGHT, 0x01, 16, 150}, //エアシリンダー左右調整_左:右方へ
-  {L2, true, LEFT, 0x01, 16, -150}  //エアシリンダー左右調整_左:左方へ
-};
-
 
 /**************************************************************************************************/
 //変数定義・初期化
@@ -123,9 +93,6 @@ const byte omniCount = sizeof(omni) / sizeof(omni[0]);
 
 //*****パルス機構の数を臨機応変に*****
 const byte pulseCommandsCount = sizeof(pulseCommands) / sizeof(pulseCommands[0]);
-
-//*****hold機構の数を臨機応変に*****
-const byte holdCommandsCount = sizeof(holdCommands) / sizeof(holdCommands[0]);
 
 //*****MCP2515とSPI通信のための宣言*****
 const byte CAN_CS_PIN = 53;
@@ -171,11 +138,8 @@ unsigned long lastSpeedSendTime = 0;
 //*****RPMの送信のインターバル*****
 const unsigned long speedSendInterval = 40;
 
-//*****holdの送信を最後に行った時刻*****
-unsigned long lastHoldSendTime[holdCommandsCount] = {0};
-
-//*****hold送信のインターバル*****
-const unsigned long holdSendInterval = 40;
+//*****バケツ用の状態監視*****
+bool bucketChargeActive = false;
 
 //*****コントローラ切断時の送信を最後に行った時刻*****
 unsigned long lastSystemOffSendTime = 0;
@@ -228,9 +192,6 @@ bool pulseCommandsStates[pulseCommandsCount] = {false};
 
 //*****パルスがいつ終わるかの予定時刻*****
 unsigned long pulseUntilMs[pulseCommandsCount] = {0};
-
-//*****holdがアクティブだったか記憶する配列*****
-bool holdCommandsStates[holdCommandsCount] = {false};
 
 /**************************************************************************************************/
 //関数
@@ -324,6 +285,21 @@ void allSystemOff(void) {
   if (!canReady) {
     Serial.println("CAN FAILS.SYSTEMOFF SKIPPED");
     return;
+  }
+  //バケツ用
+  if (bucketChargeActive) {
+    byte targetNode = 10;
+    byte funcCode = 0x01;
+    unsigned long canId;
+    if (!resolveCanId(targetNode, funcCode, canId)) {
+      return;
+    }
+    byte data[8] = {1, 0, 0, 0, 0, 0, 0, 0};
+    if (canSendChecker(canId, data)) {
+      Serial.println("BUCKET SEND SUCCESS");
+    } else {
+      Serial.println("BUCKET SEND FAILED");
+    }
   }
 }
 
@@ -515,24 +491,31 @@ void printOmniValue(void) {
 
 //*****エアシリンダーのボタンが押されたかチェックする関数*****
 void checkPulseButtons(void) {
-  bool CROSSClicked = PS4.getButtonClick(CROSS);
-  bool CIRCLEClicked = PS4.getButtonClick(CIRCLE);
-  bool TRIANGLEClicked = PS4.getButtonClick(TRIANGLE);
+  bool TRIANGLE_Clicked = PS4.getButtonClick(TRIANGLE);
+  bool CROSS_Clicked = PS4.getButtonClick(CROSS);
+  bool SQUARE_Clicked = PS4.getButtonClick(SQUARE);
+  bool CIRCLE_Clicked = PS4.getButtonClick(CIRCLE);
+  bool R1_Clicked = PS4.getButtonClick(R1);
+  bool L1_Clicked = PS4.getButtonClick(L1);
   
   for (int i = 0; i < pulseCommandsCount; i++) {
-    bool modifier_1_Clicked = PS4.getButtonPress(pulseCommands[i].modifier1);
-    bool modifier_2_Clicked = PS4.getButtonPress(pulseCommands[i].modifier2);
     bool pulseButtonClicked = false;
 
-    if (pulseCommands[i].button == CROSS) {
-      pulseButtonClicked = CROSSClicked;
+    if (pulseCommands[i].button == TRIANGLE) {
+      pulseButtonClicked = TRIANGLE_Clicked;
+    } else if (pulseCommands[i].button == CROSS) {
+      pulseButtonClicked = CROSS_Clicked;
+    } else if (pulseCommands[i].button == SQUARE) {
+      pulseButtonClicked = SQUARE_Clicked;
     } else if (pulseCommands[i].button == CIRCLE) {
-      pulseButtonClicked = CIRCLEClicked;
-    } else if (pulseCommands[i].button == TRIANGLE) {
-      pulseButtonClicked = TRIANGLEClicked;
+      pulseButtonClicked = CIRCLE_Clicked;
+    } else if (pulseCommands[i].button == R1) {
+      pulseButtonClicked = R1_Clicked;
+    } else if (pulseCommands[i].button == L1) {
+      pulseButtonClicked = L1_Clicked;
     }
     
-    if (pulseButtonClicked && modifier_1_Clicked && modifier_2_Clicked) {
+    if (pulseButtonClicked) {
       startPulse(i);
     }
   }
@@ -598,59 +581,6 @@ void cancelAllPulses(void) {
   for (int i = 0; i < pulseCommandsCount; i++) {
     if (pulseCommandsStates[i]) {
       pulseUntilMs[i] = millis();  // 終了予定時刻を「今」にして、servicePulses()に即座に処理させる
-    }
-  }
-}
-
-//*****押している間だけ動かす（hold）関数*****
-void checkHoldButtons(void) {
-  for (int i = 0; i < holdCommandsCount; i++) {
-    if (!canReady) {
-      Serial.println("CAN FAILS. HOLD SEND SKIPPED");
-      continue;
-    } else {
-      bool useModifier = holdCommands[i].useModifier;
-      bool modifierPressed = false;
-      bool buttonPressed = PS4.getButtonPress(holdCommands[i].button);
-      if (useModifier) {
-        modifierPressed = PS4.getButtonPress(holdCommands[i].modifier);
-      } else {
-        modifierPressed = true;
-      }
-      if (buttonPressed && modifierPressed) {
-        if ((unsigned long)(millis() - lastHoldSendTime[i]) >= holdSendInterval) {
-          lastHoldSendTime[i] = millis();
-          int sendValue = holdCommands[i].sendValue;
-          byte targetNode = holdCommands[i].targetNode;
-          byte funcCode = holdCommands[i].funcCode;
-          unsigned long canId;
-          if (!resolveCanId(targetNode, funcCode, canId)) {
-            continue;
-          }
-          byte data[8] = {1, (byte)((sendValue >> 8) & 0xFF), (byte)(sendValue & 0xFF), 0, 0, 0, 0, 0};
-          if (canSendChecker(canId, data)) {
-            Serial.println("CAN SEND SUCCESS");
-            holdCommandsStates[i] = true;
-          } else {
-            Serial.println("CAN SEND FAILED");
-          }
-        }
-      } else if (holdCommandsStates[i]) {
-        int sendValue = 0;
-        byte targetNode = holdCommands[i].targetNode;
-        byte funcCode = holdCommands[i].funcCode;
-        unsigned long canId;
-        if (!resolveCanId(targetNode, funcCode, canId)) {
-          continue;
-        }
-        byte data[8] = {1, (byte)((sendValue >> 8) & 0xFF), (byte)(sendValue & 0xFF), 0, 0, 0, 0, 0};
-        if (canSendChecker(canId, data)) {
-          Serial.println("CAN SEND SUCCESS");
-          holdCommandsStates[i] = false;
-        } else {
-         Serial.println("CAN SEND FAILED");
-        }
-      }
     }
   }
 }
@@ -792,7 +722,6 @@ void loop() {
   }
 
   checkPulseButtons();
-  checkHoldButtons();
 
   float vx = readStickRawValue(PS4.getAnalogHat(RightHatX), false);
   float vy = readStickRawValue(PS4.getAnalogHat(RightHatY), true);
