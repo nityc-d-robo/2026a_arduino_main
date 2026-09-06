@@ -272,13 +272,6 @@ void canRetry(void) {
   }
 }
 
-//*****EmergencyStop時に即時ZERO送信*****
-void sendAllZeroNow(void) {
-  for (int i = 0; i < omniCount; i++) {
-    downScaleRPM[i] = 0;
-  }
-  sendSpeedCan();
-}
 
 //*****PS4切断時に全機構OFF*****
 void allSystemOff(void) {
@@ -297,6 +290,7 @@ void allSystemOff(void) {
     byte data[8] = {1, 0, 0, 0, 0, 0, 0, 0};
     if (canSendChecker(canId, data)) {
       Serial.println("BUCKET SEND SUCCESS");
+      bucketChargeActive = false;
     } else {
       Serial.println("BUCKET SEND FAILED");
     }
@@ -437,7 +431,7 @@ void sendSpeedCan(void) {
       Serial.println("CAN FAILS. RPM SEND SKIPPED");
       break;
     } else {
-      int sendValue = downScaleRPM[i];
+      int sendValue = actualSendValues[i];
       byte targetNode = omni[i].targetNode;
       byte funcCode = 0x01;
       unsigned long canId;
@@ -461,15 +455,9 @@ void ReSendSpeed(void) {
   } else {
     if ((unsigned long)(millis() - lastSpeedSendTime) >= speedSendInterval) {
       lastSpeedSendTime = millis();
+      applySlewLimit();
       sendSpeedCan();
     }
-  }
-}
-
-//*****DownScaleRPMを切断時0に*****
-void clearDownScaleRPM(void) {
-  for (int i = 0; i < omniCount; i++) {
-    downScaleRPM[i] = 0;
   }
 }
 
@@ -486,6 +474,26 @@ void printOmniValue(void) {
     Serial.print(rawRPM[i]);
     Serial.print(" -> downScaleValue = ");
     Serial.println(downScaleRPM[i]);
+  }
+}
+
+//*****オムニに0を送り続ける*****
+void stopOmniNow(void) {
+  for (int i = 0; i < omniCount; i++) {
+    downScaleRPM[i] = 0;
+    actualSendValues[i] = 0;
+  }
+  sendSpeedCan();
+}
+
+//*****オムニ0送信再送*****
+void ReSendOmniStop(void) {
+  if (!canReady) {
+    return;
+  }
+  if ((unsigned long)(millis() - lastSpeedSendTime) >= speedSendInterval) {
+    lastSpeedSendTime = millis();
+    stopOmniNow();
   }
 }
 
@@ -591,7 +599,7 @@ void emergencyStop(void) {
   if (psClicked && !emergencyStopLatched) {
     emergencyStopLatched = true;
     cancelAllPulses();
-    sendAllZeroNow();
+    stopOmniNow();
     allSystemOff();
     if (!canReady) {
       Serial.println("CAN FAILS. EMERGENCY SEND SKIPPED");
@@ -618,27 +626,6 @@ void unlockEmergency(void) {
       canSendChecker(canId, unlockEmergencyData);
       emergencyStopLatched = false;
     }
-  }
-}
-
-//*****状態読み取りの重複回避*****
-bool readStateChecker(ButtonEnum button) {
-  bool R2Pressed = PS4.getButtonPress(R2);
-  bool L2Pressed = PS4.getButtonPress(L2);
-  if (button == CROSS) {
-    if (R2Pressed || L2Pressed) {
-      return true;
-    } else {
-      return false;
-    }
-  } else if (button == TRIANGLE) {
-    if (R2Pressed && L2Pressed) {
-      return true;
-    } else {
-      return false;
-    }
-  } else { 
-    return false;
   }
 }
 
@@ -707,17 +694,16 @@ void loop() {
 //*****接続されていないときはloop先頭に戻る*****
   if (!PS4.connected()) {
     ReSendSystemOff();
-    clearDownScaleRPM();
-    ReSendSpeed();
+    ReSendOmniStop();
     return;
   }
     
   emergencyStop();
   unlockEmergency();
-  ReSendSpeed();
 
   if (emergencyStopLatched) {
     ReSendSystemOff();
+    ReSendSpeed();    
     return;
   }
 
