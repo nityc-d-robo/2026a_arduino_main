@@ -3,9 +3,6 @@
 #include <SPI.h>
 #include <mcp_can.h>
 
-//*****エアシリンダー用の最大値*****
-const int airMaxValue = 1000;
-
 //*****PWMのフルパワー*****
 const int pulseMaxValue = 1000;
 
@@ -208,10 +205,18 @@ const char* buttonName(ButtonEnum b) {
       return "CROSS";
     case SQUARE:
       return "SQUARE";
+    case L1:
+      return "L1";
+    case R1:
+      return "R1";
     case L2:
       return "L2";
     case R2:
       return "R2";
+    case SHARE:
+      return "SHARE";
+    case PS:
+      return "PS";
     default:
       return "Unknown_Button";
   }
@@ -544,16 +549,17 @@ void startPulse(byte index) {
   int sendValue = pulseCommands[index].pulseValue;
   byte data[8] = {1, (byte)((sendValue >> 8) & 0xFF), (byte)(sendValue & 0xFF), 0, 0, 0, 0, 0};
   if (canSendChecker(canId, data)) {
-    Serial.println("CAN SEND SUCCESS (PULSE START)");
+    Serial.print(buttonName(pulseCommands[index].button));
+    Serial.println(" PRESSED: PULSE START SEND SUCCESS");
     pulseCommandsStates[index] = true;
     pulseUntilMs[index] = millis() + pulseCommands[index].sendPulseTimeLength;
   } else {
-    Serial.println("CAN SEND FAILED (PULSE START)");
-  }
+    Serial.print(buttonName(pulseCommands[index].button));
+    Serial.println(" PRESSED: PULSE START SEND FAILED");  }
 }
 
 //*****毎ループ呼ばれ、終了予定時刻を過ぎたパルスを自動的に止める*****
-void servicePulses(void) {
+void autoStopPulses(void) {
   for (int i = 0; i < pulseCommandsCount; i++) {
     if (!pulseCommandsStates[i]) {
       continue;
@@ -577,18 +583,20 @@ void stopPulse(byte index) {
   }
   byte data[8] = {1, 0, 0, 0, 0, 0, 0, 0};
   if (canSendChecker(canId, data)) {
-    Serial.println("CAN SEND SUCCESS (PULSE STOP)");
+    Serial.print(buttonName(pulseCommands[index].button));
+    Serial.println(" PRESSED: PULSE STOP SEND SUCCESS");
     pulseCommandsStates[index] = false;
   } else {
-    Serial.println("CAN SEND FAILED (PULSE STOP)");
+    Serial.print(buttonName(pulseCommands[index].button));
+    Serial.println(" PRESSED: PULSE STOP SEND FAILED");
   }
 }
 
 //*****全パルスを強制終了させる（非常停止）*****
-void cancelAllPulses(void) {
+void setPulsesEndTime(void) {
   for (int i = 0; i < pulseCommandsCount; i++) {
     if (pulseCommandsStates[i]) {
-      pulseUntilMs[i] = millis();  // 終了予定時刻を「今」にして、servicePulses()に即座に処理させる
+      pulseUntilMs[i] = millis();  // 終了予定時刻を「今」にして、autoStopPulses()に即座に処理させる
     }
   }
 }
@@ -598,7 +606,8 @@ void emergencyStop(void) {
   bool psClicked = PS4.getButtonClick(PS);
   if (psClicked && !emergencyStopLatched) {
     emergencyStopLatched = true;
-    cancelAllPulses();
+    setPulsesEndTime();
+    autoStopPulses();
     stopOmniNow();
     allSystemOff();
     if (!canReady) {
@@ -616,16 +625,17 @@ void emergencyStop(void) {
 //0x03は要検討
 void unlockEmergency(void) {
   bool shareClicked = PS4.getButtonClick(SHARE);
+  if (!shareClicked || !emergencyStopLatched) {
+    return;
+  }
+  emergencyStopLatched = false;
   if (!canReady) {
     Serial.println("CAN FAILS. UNLOCK EMERGENCY SEND SKIPPED");
   } else {
-    if (shareClicked && emergencyStopLatched) {
-      unsigned long canId = (0x03 << 8) | 0x00;
-      byte unlockEmergencyData[8] = {0};
-      unlockEmergencyData[0] = 1;
-      canSendChecker(canId, unlockEmergencyData);
-      emergencyStopLatched = false;
-    }
+    unsigned long canId = (0x03 << 8) | 0x00;
+    byte unlockEmergencyData[8] = {0};
+    unlockEmergencyData[0] = 1;
+    canSendChecker(canId, unlockEmergencyData);
   }
 }
 
@@ -684,17 +694,20 @@ void setup() {
 
 /**************************************************************************************************/
 //loop
+//切断時のエッジ検出＋ESTOPフレーム送信（B-2）はwio実装まで不明なため未実装。
 /**************************************************************************************************/
 void loop() {
   Usb.Task();
   canRetry();
   ReSendINIT();
-  servicePulses();
+  autoStopPulses();
   
 //*****接続されていないときはloop先頭に戻る*****
   if (!PS4.connected()) {
     ReSendSystemOff();
     ReSendOmniStop();
+    setPulsesEndTime();
+    autoStopPulses();
     return;
   }
     
