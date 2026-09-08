@@ -22,21 +22,22 @@ struct MotorNode {
   byte controlMode;
   byte maxValueKind;
   unsigned int maxValue;
+  byte typeId;
   byte nodeNum;
   byte deviceId;
 };
 
 //*****機構の構造体の配列の初期化・代入*****
 MotorNode motorNodes[] = {
-  {1, 3, 0, 0, 0, 0},//FL
-  {1, 3, 0, 0, 0, 1},//FR
-  {1, 3, 0, 0, 0, 2},//RR
-  {1, 3, 0, 0, 0, 3},//RL
-  {0, 5, 0, 0, 1, 0},//2X_R
-  {0, 5, 0, 0, 1, 1},//2X_L
-  {0, 5, 0, 0, 1, 2},//4X_R
-  {0, 5, 0, 0, 1, 3},//4X_L
-  {0, 5, 0, 0, 2, 0},//バケツ
+  {1, 3, 0, 0, 0b011, 0, 0},//FL
+  {1, 3, 0, 0, 0b011, 0, 1},//FR
+  {1, 3, 0, 0, 0b011, 0, 2},//RR
+  {1, 3, 0, 0, 0b011, 0, 3},//RL
+  {0, 5, 0, 0, 0b011, 1, 0},//2X_R
+  {0, 5, 0, 0, 0b011, 1, 1},//2X_L
+  {0, 5, 0, 0, 0b011, 1, 2},//4X_R
+  {0, 5, 0, 0, 0b011, 1, 3},//4X_L
+  {0, 5, 0, 0, 0b011, 2, 0},//バケツ
 };
 
 //*****オムニの構造体*****
@@ -94,9 +95,6 @@ MCP_CAN CAN0(CAN_CS_PIN);
 //*****CAN0.beginに渡す値*****
 const byte CAN_BUS_SPEED = CAN_1000KBPS;
 const byte MCP2515_CLOCK = MCP_8MHZ;
-
-//*****共通なので構造体にしなかったやつ*****
-const byte typeId = 0b011;
 
 //*****INITのデータ*****
 byte initData[8] = {0};
@@ -230,10 +228,13 @@ bool resolveCanId(byte targetNode, byte funcCode, unsigned long &canId) {
   if (targetNode >= motorNodesCount) {
     return false;
   } else {
+    byte typeId = motorNodes[targetNode].typeId;
     byte nodeNum = motorNodes[targetNode].nodeNum;
     byte deviceId = motorNodes[targetNode].deviceId;
     //範囲外チェック
-    if (nodeNum > 3) {
+    if (typeId > 7) {
+      return false;
+    } else if (nodeNum > 3) {
       return false; 
     } else if (deviceId > 7) {
       return false;
@@ -448,7 +449,7 @@ void printOmniValue(void) {
     Serial.print(rawRPM[i]);
     Serial.print(" -> downScaleValue = ");
     Serial.print(downScaleRPM[i]);
-    Serial.print(" ー＞ actualSendValue = ");
+    Serial.print(" -> actualSendValue = ");
     Serial.println(actualSendValues[i]);
   }
 }
@@ -568,6 +569,7 @@ void emergencyStop(void) {
     setPulsesEndTime();
     autoStopPulses();
     stopOmniNow();
+    sendAllZero();
     if (!canReady) {
       Serial.println("CAN FAILS. EMERGENCY SEND SKIPPED");
     } else {
