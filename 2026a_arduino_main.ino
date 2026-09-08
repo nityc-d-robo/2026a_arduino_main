@@ -3,14 +3,14 @@
 #include <SPI.h>
 #include <mcp_can.h>
 
-//*****PWMのフルパワー*****
-const int pulseMaxValue = 1000;
-
 //*****オブジェクト宣言*****
 USB Usb;
 BTD Btd(&Usb);
 PS4BT PS4(&Btd);
 PS4BT PS4_2(&Btd);
+
+//*****エアシリンダーON*****
+const bool pulseOnValue = 1;
 
 /**************************************************************************************************/
 //構造体定義・初期化
@@ -32,14 +32,11 @@ MotorNode motorNodes[] = {
   {1, 3, 0, 0, 0, 1},//FR
   {1, 3, 0, 0, 0, 2},//RR
   {1, 3, 0, 0, 0, 3},//RL
-  {0, 1, 0, 0, 1, 0},//2X_FL
-  {0, 1, 0, 0, 1, 1},//2X_FR
-  {0, 1, 0, 0, 1, 2},//2X_RR
-  {0, 1, 0, 0, 1, 3},//2X_RL
-  {0, 1, 0, 0, 1, 4},//4X_R
-  {0, 1, 0, 0, 1, 5},//4X_L
-  {0, 1, 0, 0, 2, 0},//バケツ（モーター）
-  {0, 1, 0, 0, 2, 1},//バケツ（エアー？）
+  {0, 5, 0, 0, 1, 0},//2X_R
+  {0, 5, 0, 0, 1, 1},//2X_L
+  {0, 5, 0, 0, 1, 2},//4X_R
+  {0, 5, 0, 0, 1, 3},//4X_L
+  {0, 5, 0, 0, 2, 0},//バケツ
 };
 
 //*****オムニの構造体*****
@@ -70,12 +67,11 @@ struct PulseButtonCommand {
 
 //*****エアシリンダー用構造体の初期化*****
 PulseButtonCommand pulseCommands[] {
-  {TRIANGLE,  0x01, 4, pulseMaxValue, 300},  //2X_FL
-  {CROSS,     0x01, 5, pulseMaxValue, 300},  //2X_FR
-  {SQUARE,    0x01, 6, pulseMaxValue, 300},  //2X_RR
-  {CIRCLE,    0x01, 7, pulseMaxValue, 300},  //2X_RL
-  {R1,        0x01, 8, pulseMaxValue, 300},  //4X_R
-  {L1,        0x01, 9, pulseMaxValue, 300},  //4X_L
+  {CIRCLE,    0x01, 6, pulseOnValue, 300}, //4X_R
+  {SQUARE,    0x01, 4, pulseOnValue, 300}, //2X_R
+  {RIGHT,     0x01, 5, pulseOnValue, 300}, //2X_L
+  {LEFT,      0x01, 7, pulseOnValue, 300}, //4X_L
+  {TRIANGLE,  0x01, 8, pulseOnValue, 300}  //バケツ
 };
 
 /**************************************************************************************************/
@@ -135,15 +131,6 @@ unsigned long lastSpeedSendTime = 0;
 //*****RPMの送信のインターバル*****
 const unsigned long speedSendInterval = 40;
 
-//*****バケツ用の状態監視*****
-bool bucketChargeActive = false;
-
-//*****コントローラ切断時の送信を最後に行った時刻*****
-unsigned long lastSystemOffSendTime = 0;
-
-//*****コントローラ切断時の送信のインターバル*****
-const unsigned long systemOffSendInterval = 40;
-
 //*****最後にデバッグ出力をした時刻*****
 unsigned long lastDebugPrintTime = 0;
 
@@ -154,7 +141,7 @@ const unsigned long debugPrintInterval = 300;
 const int translateMaxRPM = 170;
 
 //*****回転最大RPM*****
-const int rotateMaxRPM = 80;
+const int rotateMaxRPM = 100;
 
 //*****最大RPM*****
 const int maxRPM = 200;
@@ -170,6 +157,18 @@ const byte stickCenter = 127;
 
 //*****スティックのデッドゾーン*****
 const byte stickDeadZone = 18;
+
+//SUCCESSを最後に送った時間
+unsigned long lastCanSuccessSendTime = 0;
+
+//SUCCESSの送信インターバル
+const unsigned long canSuccessSendInterval = 1000;
+
+//FAILを最後に送った時間
+unsigned long lastCanFailSendTime = 0;
+
+//FAILの送信インターバル
+const unsigned long canFailSendInterval = 250;
 
 /**************************************************************************************************/
 //配列
@@ -213,6 +212,10 @@ const char* buttonName(ButtonEnum b) {
       return "L2";
     case R2:
       return "R2";
+    case LEFT:
+      return "LEFT";
+    case RIGHT:
+      return "RIGHT";
     case SHARE:
       return "SHARE";
     case PS:
@@ -244,9 +247,17 @@ bool resolveCanId(byte targetNode, byte funcCode, unsigned long &canId) {
 //*****canFailCountをリセット/+1する関数
 bool canSendChecker(unsigned long canId, byte data[8]) {
   if (CAN0.sendMsgBuf(canId, 0, 8, data) == CAN_OK) {
+    if ((unsigned long)(millis() - lastCanSuccessSendTime) >= canSuccessSendInterval) {
+      lastCanSuccessSendTime = millis();
+      Serial.println("CAN SEND SUCCESS");
+    }
     canFailCount = 0;
     return true;
   } else {
+    if ((unsigned long)(millis() - lastCanFailSendTime) >= canFailSendInterval) {
+      lastCanFailSendTime = millis();
+      Serial.println("CAN SEND FAILED");
+    }
     canFailCount++;
     if (canFailCount >= maxCanFailCount) {
       canReady = false;
@@ -277,43 +288,6 @@ void canRetry(void) {
   }
 }
 
-
-//*****PS4切断時に全機構OFF*****
-void allSystemOff(void) {
-  if (!canReady) {
-    Serial.println("CAN FAILS.SYSTEMOFF SKIPPED");
-    return;
-  }
-  //バケツ用
-  if (bucketChargeActive) {
-    byte targetNode = 10;
-    byte funcCode = 0x01;
-    unsigned long canId;
-    if (!resolveCanId(targetNode, funcCode, canId)) {
-      return;
-    }
-    byte data[8] = {1, 0, 0, 0, 0, 0, 0, 0};
-    if (canSendChecker(canId, data)) {
-      Serial.println("BUCKET SEND SUCCESS");
-      bucketChargeActive = false;
-    } else {
-      Serial.println("BUCKET SEND FAILED");
-    }
-  }
-}
-
-//*****コントローラ切断時継続送信*****
-void ReSendSystemOff(void) {
-  if (!canReady) {
-    return;
-  } else {
-    if ((unsigned long)(millis() - lastSystemOffSendTime) >= systemOffSendInterval) {
-      lastSystemOffSendTime = millis();
-      allSystemOff();
-    }
-  }
-}
-
 //*****INIT送信*****
 void sendINIT(void) {
   if (canReady) {
@@ -333,11 +307,7 @@ void sendINIT(void) {
       if (!resolveCanId(i, funcCode, canId)) {
         continue;
       }
-      if (canSendChecker(canId, initData) == true) {
-        Serial.println("INIT SEND SUCCESS");
-      } else {
-        Serial.println("INIT SEND FAILED");
-      } 
+      canSendChecker(canId, initData);
     }
   }
 }
@@ -433,7 +403,10 @@ void scaleDown(void) {
 void sendSpeedCan(void) {
   for (int i= 0; i < omniCount; i++) {
     if (!canReady) {
-      Serial.println("CAN FAILS. RPM SEND SKIPPED");
+      if ((unsigned long)(millis() - lastCanFailSendTime) >= canFailSendInterval) {
+        lastCanFailSendTime = millis();
+        Serial.println("CAN FAILS. RPM SEND SKIPPED");
+      }
       break;
     } else {
       int sendValue = actualSendValues[i];
@@ -444,11 +417,7 @@ void sendSpeedCan(void) {
         continue;
       }
       byte data[8] = {1, (byte)((sendValue >> 8) & 0xFF), (byte)(sendValue & 0xFF), 0, 0, 0, 0, 0};
-      if (canSendChecker(canId, data)) {
-        Serial.println("CAN SEND SUCCESS");
-      } else {
-        Serial.println("CAN SEND FAILED");
-      }
+      canSendChecker(canId, data);
     }
   }
 }
@@ -478,7 +447,9 @@ void printOmniValue(void) {
     Serial.print(":rawValue = ");
     Serial.print(rawRPM[i]);
     Serial.print(" -> downScaleValue = ");
-    Serial.println(downScaleRPM[i]);
+    Serial.print(downScaleRPM[i]);
+    Serial.print(" ー＞ actualSendValue = ");
+    Serial.println(actualSendValues[i]);
   }
 }
 
@@ -505,27 +476,24 @@ void ReSendOmniStop(void) {
 //*****エアシリンダーのボタンが押されたかチェックする関数*****
 void checkPulseButtons(void) {
   bool TRIANGLE_Clicked = PS4.getButtonClick(TRIANGLE);
-  bool CROSS_Clicked = PS4.getButtonClick(CROSS);
   bool SQUARE_Clicked = PS4.getButtonClick(SQUARE);
   bool CIRCLE_Clicked = PS4.getButtonClick(CIRCLE);
-  bool R1_Clicked = PS4.getButtonClick(R1);
-  bool L1_Clicked = PS4.getButtonClick(L1);
+  bool RIGHT_Clicked = PS4.getButtonClick(RIGHT);
+  bool LEFT_Clicked = PS4.getButtonClick(LEFT);
   
   for (int i = 0; i < pulseCommandsCount; i++) {
     bool pulseButtonClicked = false;
 
     if (pulseCommands[i].button == TRIANGLE) {
       pulseButtonClicked = TRIANGLE_Clicked;
-    } else if (pulseCommands[i].button == CROSS) {
-      pulseButtonClicked = CROSS_Clicked;
     } else if (pulseCommands[i].button == SQUARE) {
       pulseButtonClicked = SQUARE_Clicked;
     } else if (pulseCommands[i].button == CIRCLE) {
       pulseButtonClicked = CIRCLE_Clicked;
-    } else if (pulseCommands[i].button == R1) {
-      pulseButtonClicked = R1_Clicked;
-    } else if (pulseCommands[i].button == L1) {
-      pulseButtonClicked = L1_Clicked;
+    } else if (pulseCommands[i].button == RIGHT) {
+      pulseButtonClicked = RIGHT_Clicked;
+    } else if (pulseCommands[i].button == LEFT) {
+      pulseButtonClicked = LEFT_Clicked;
     }
     
     if (pulseButtonClicked) {
@@ -549,13 +517,9 @@ void startPulse(byte index) {
   int sendValue = pulseCommands[index].pulseValue;
   byte data[8] = {1, (byte)((sendValue >> 8) & 0xFF), (byte)(sendValue & 0xFF), 0, 0, 0, 0, 0};
   if (canSendChecker(canId, data)) {
-    Serial.print(buttonName(pulseCommands[index].button));
-    Serial.println(" PRESSED: PULSE START SEND SUCCESS");
     pulseCommandsStates[index] = true;
     pulseUntilMs[index] = millis() + pulseCommands[index].sendPulseTimeLength;
-  } else {
-    Serial.print(buttonName(pulseCommands[index].button));
-    Serial.println(" PRESSED: PULSE START SEND FAILED");  }
+  }
 }
 
 //*****毎ループ呼ばれ、終了予定時刻を過ぎたパルスを自動的に止める*****
@@ -583,12 +547,7 @@ void stopPulse(byte index) {
   }
   byte data[8] = {1, 0, 0, 0, 0, 0, 0, 0};
   if (canSendChecker(canId, data)) {
-    Serial.print(buttonName(pulseCommands[index].button));
-    Serial.println(" PRESSED: PULSE STOP SEND SUCCESS");
     pulseCommandsStates[index] = false;
-  } else {
-    Serial.print(buttonName(pulseCommands[index].button));
-    Serial.println(" PRESSED: PULSE STOP SEND FAILED");
   }
 }
 
@@ -609,7 +568,6 @@ void emergencyStop(void) {
     setPulsesEndTime();
     autoStopPulses();
     stopOmniNow();
-    allSystemOff();
     if (!canReady) {
       Serial.println("CAN FAILS. EMERGENCY SEND SKIPPED");
     } else {
@@ -651,11 +609,7 @@ void sendAllZero(void) {
       continue;
     }
     byte data[8] = {1, 0, 0, 0, 0, 0, 0, 0};
-    if (canSendChecker(canId, data)) {
-      Serial.println("ZERO SEND SUCCESS");
-    } else { 
-      Serial.println("ZERO SEND FAILED");
-    }
+    canSendChecker(canId, data);
   }
 }
 
@@ -704,7 +658,6 @@ void loop() {
   
 //*****接続されていないときはloop先頭に戻る*****
   if (!PS4.connected()) {
-    ReSendSystemOff();
     ReSendOmniStop();
     setPulsesEndTime();
     autoStopPulses();
@@ -715,7 +668,6 @@ void loop() {
   unlockEmergency();
 
   if (emergencyStopLatched) {
-    ReSendSystemOff();
     ReSendSpeed();    
     return;
   }
