@@ -1,16 +1,26 @@
-#include <PS4BT.h>
-#include <usbhub.h>
 #include <SPI.h>
 #include <mcp_can.h>
 #include <avr/wdt.h>
 
-//*****オブジェクト宣言*****
-USB Usb;
-BTD Btd(&Usb);
-PS4BT PS4(&Btd);
-PS4BT PS4_2(&Btd);
-//PS4は1台目，先に接続されたコントローラー
-//PS4_2は2台目，次に接続されたコントローラー
+//*****ボタンのビット番号*****
+const byte btnBit_CROSS     = 0;
+const byte btnBit_CIRCLE    = 1;
+const byte btnBit_SQUARE    = 2;
+const byte btnBit_TRIANGLE  = 3;
+const byte btnBit_UP        = 4;
+const byte btnBit_DOWN      = 5;
+const byte btnBit_LEFT      = 6;
+const byte btnBit_RIGHT     = 7;
+const byte btnBit_L1        = 8;
+const byte btnBit_R1        = 9;
+const byte btnBit_L3        = 10;
+const byte btnBit_R3        = 11;
+const byte btnBit_L2        = 12;
+const byte btnBit_R2        = 13;
+const byte btnBit_SHARE     = 14;
+const byte btnBit_START     = 15;
+const byte btnBit_PS        = 16;
+const byte btnBit_MUTE      = 17;
 
 //*****エアシリンダーのバルブ番号(仮)*****
 const byte Bucket = 3;
@@ -63,18 +73,34 @@ OmniWheel omni[] {
 
 //*****エアシリンダー用の構造体*****
 struct PulseButtonCommand {
-  ButtonEnum button;
+  byte button;
   byte valveNum;
   unsigned int sendPulseTimeLength;
 };
 
 //*****エアシリンダー用構造体の初期化*****
 PulseButtonCommand pulseCommands[] {
-  {SQUARE,    LEFT_4X,  pulseStopInterval},
-  {CIRCLE,    RIGHT_4X, pulseStopInterval},
-  {TRIANGLE,  LEFT_2X,  pulseStopInterval},
-  {CROSS,     RIGHT_2X, pulseStopInterval}
+  {btnBit_SQUARE,   LEFT_4X,  pulseStopInterval}, 
+  {btnBit_CIRCLE,   RIGHT_4X, pulseStopInterval}, 
+  {btnBit_TRIANGLE, LEFT_2X,  pulseStopInterval}, 
+  {btnBit_CROSS,    RIGHT_2X, pulseStopInterval}  
 };
+
+//*****パケットを受け取る構造体*****
+struct __attribute__((packed)) ControllerPacket {
+  int8_t leftX;
+  int8_t leftY;
+  int8_t rightX;
+  int8_t rightY;
+
+  uint8_t leftTrigger;
+  uint8_t rightTrigger;
+
+  uint32_t buttons;
+};
+
+//*****初期化*****
+ControllerPacket controller = {0, 0, 0, 0, 0, 0, 0};
 
 /**************************************************************************************************/
 //変数定義・初期化
@@ -154,7 +180,7 @@ const int RPMLimitPerSec = 400;
 const float coefValue = 0.7071f;
 
 //*****スティックの値の中心値*****
-const byte stickCenter = 127;
+const byte stickMaxValue = 127;
 
 //*****スティックのデッドゾーン*****
 const byte stickDeadZone = 18;
@@ -180,6 +206,7 @@ const unsigned long zeroSendInterval = 50;
 //*****オムニをprintするか*****
 const bool printOmni = true;
 
+
 //*****速度倍率_低速*****
 const float slowSpeedScale = 0.4f;
 
@@ -188,13 +215,31 @@ const float fastSpeedScale = 1.5f;
 
 //*****接続診断（切断）
 bool Pad1_wasConnected = false;
-bool Pad2_wasConnected = false;
 
 //*****切断した時点の時間*****
 unsigned long lastDisconnectTime = 0;
 
 //*****切断後SHAREを押さないと動作しなくなる時間*****
 const unsigned long needSHAREButtonTime = 1000;
+//*****wio*****
+#define wioSerial Serial1
+
+//*****wioタイムアウト*****
+const unsigned long wioLinkTimeout = 300;
+
+//*****開始バイト待ちか受信中か*****
+bool recieveState = false;
+
+//*****カウンタ*****
+byte byteCounta = 0;
+
+//最後に受け取った時間
+unsigned long lastWioRecieveTime = 0;
+
+//*****バッファ*****
+byte wioBuffer[11];
+
+uint32_t lastButtonsState = 0;
 
 
 unsigned long lastLoopStartTime = 0;
@@ -241,6 +286,57 @@ bool makeCanId(byte funcCode, byte typeId, byte nodeNum, byte deviceId, unsigned
   } else {
     canId = (funcCode << 8) | (typeId << 5) | (nodeNum << 3) | (deviceId);
     return true;
+  }
+}
+//*****接続判定*****
+bool wioConnected(void) {
+  if ((unsigned long)(millis() - lastWioRecieveTime) < wioLinkTimeout) {
+    return true;
+  } else {
+    return false;
+  }
+}
+
+//*****クリック判定*****
+bool wioButtonClicked(byte bit) {
+  byte currentState = ((controller.buttons >> bit) & 1);
+  byte lastState = ((lastButtonsState >> bit) & 1);
+  if (currentState && !lastState) {
+    return true;
+  } else {
+    return false;
+  }
+}
+
+//*****受信関数*****
+void recieveWioData(void) {
+  while (wioSerial.available()) {
+    byte b = wioSerial.read();
+    if (!recieveState) {
+      if (b == 0xAA) {
+        byteCounta = 0;
+        recieveState = true;
+      } else {
+        continue;
+      }
+    } else {
+      wioBuffer[byteCounta] = b;
+      byteCounta++;
+      if (byteCounta == 11) {
+        //wioBuffer の先頭10バイトをXORし、計算結果を求める
+        byte result = 0;
+        for (int i = 0; i < 10; i++) {
+          result ^= wioBuffer[i];
+        }
+        if (result == wioBuffer[10]) {
+          //wioBuffer の先頭10バイトを controller 構造体にコピーする
+          memcpy(&controller, wioBuffer, sizeof(controller));
+          lastWioRecieveTime = millis();
+        }
+        recieveState = false;
+        byteCounta = 0;
+      }
+    }
   }
 }
 
@@ -431,15 +527,15 @@ void applySlewLimit(void) {
 }
 
 //*****スティックの値を正規化する関数*****
-float readStickRawValue(byte rawValue, bool needReverse) {
-  int difference = (int)(rawValue - stickCenter);
+float readStickRawValue(int8_t rawValue, bool needReverse) {
+  int difference = (int)(rawValue);
   if (needReverse) {
     difference = -difference;
   }
   if (abs(difference) <= stickDeadZone) {
     return 0.0f;
   }
-  float remainingRange = stickCenter - stickDeadZone;
+  float remainingRange = stickMaxValue - stickDeadZone;
   float normalizationValue = (abs(difference) - stickDeadZone) / remainingRange;
   if (normalizationValue >= 1.0) {
     normalizationValue = 1.0;
@@ -546,10 +642,8 @@ void printOmniValue(void) {
 
 //*****高速/低速/通常を返す関数*****
 float getSpeedScale(void) {
-  //bool slow = (controler.buttons >> btnBit_R1) & 1;
-  //bool fast = (controler.buttons >> btnBit_L1) & 1;
-  bool slow = PS4.getButtonPress(R1);
-  bool fast = PS4.getButtonPress(L1);
+  bool slow = (controller.buttons >> btnBit_R1) & 1;
+  bool fast = (controller.buttons >> btnBit_L1) & 1;
   if (slow == fast) {
     return 1.0f;
   } else if (slow) {
@@ -654,7 +748,7 @@ void pulseOn_OFF(void) {
 //*****エアシリンダーのボタンが押されたかチェックする関数*****
 void checkPulseButtons(void) {
   for (int i = 0; i < pulseCommandsCount; i++) {
-    if (PS4.getButtonClick(pulseCommands[i].button)) {
+    if (wioButtonClicked(pulseCommands[i].button)) {
       writeValveOn(pulseCommands[i].valveNum, pulseCommands[i].sendPulseTimeLength);
     }
   }
@@ -680,11 +774,10 @@ void sendCANStop(void) {
 
 //*****非常停止*****
 void emergencyStop(void) {
-  bool psClicked = PS4.getButtonClick(PS);
+  bool psClicked = wioButtonClicked(btnBit_PS);
   if (psClicked && !emergencyStopLatched) {
     emergencyStopLatched = true;
-    setLEDColor();
-
+    
     allPulseStop();
     stopOmniNow();
     sendAllZero();
@@ -696,7 +789,7 @@ void emergencyStop(void) {
 //*****非常停止解除*****
 //0x03は要検討
 void unlockEmergency(void) {
-  bool shareClicked = PS4.getButtonClick(SHARE);
+  bool shareClicked = wioButtonClicked(btnBit_SHARE);
   if (!shareClicked || !emergencyStopLatched) {
     return;
   }
@@ -711,18 +804,9 @@ void unlockEmergency(void) {
       emergencyStopLatched = true;
     } else {
       emergencyStopLatched = false;
-      clearButtons();
-      setLEDColor();
+      lastButtonsState = controller.buttons;
     }
   }
-}
-
-//*****非常停止解除時に読み取っていた値を消費する*****
-void clearButtons(void) {
-  for (int i = 0; i < pulseCommandsCount; i++) {
-    PS4.getButtonClick(pulseCommands[i].button);
-  }
-  PS4.getButtonClick(R2);
 }
 
 //*****何らかの原因でMegaが再起動したとき0を送る*****
@@ -752,26 +836,6 @@ void ReSendAllZero(void) {
   }
 }
 
-//*****コントローラーのLED変化*****
-void setLEDColor(void) {
-  if (!PS4.connected()) {
-    return;
-  }
-  if (emergencyStopLatched) {
-    PS4.setLed(Red);
-  } else {
-    PS4.setLed(Blue);
-  }
-}
-
-//*****2台目コントローラーの接続判定*****
-void Pad2ConnectState(void) {
-  bool isConnected = PS4_2.connected();
-  if (!Pad2_wasConnected && isConnected) {
-    PS4_2.setLed(Green);
-  }
-  Pad2_wasConnected = isConnected;
-}
 
 /**************************************************************************************************/
 //Setup
@@ -786,7 +850,7 @@ void setup() {
   digitalWrite(10, HIGH);
   pinMode(CAN_CS_PIN, OUTPUT);
   digitalWrite(CAN_CS_PIN, HIGH);
-  setLEDColor();
+
   lastDisconnectTime = millis() - needSHAREButtonTime;
 
   //*****リセットが行われたときに原因をprint
@@ -811,15 +875,6 @@ void setup() {
     Serial.println(F("Reset cause: None(正しく診断できていない)"));
   }
 
-  //*****USB成功/失敗判定*****
-  if (Usb.Init() == -1) {
-    Serial.println(F("USB host did not start."));
-    while (1);
-  } else {
-    Serial.println(F("USB Host Ready."));
-
-  }
-
   //*****CAN成功/失敗判定*****
   if (CAN0.begin(MCP_ANY, CAN_BUS_SPEED, MCP2515_CLOCK) == CAN_OK) {
     Serial.println(F("CAN_Successful"));
@@ -835,6 +890,11 @@ void setup() {
     pulseSent[i] = true;
   }
   allPulseStop();
+
+  //デバッグ用
+  Serial.print("sizeof(ControllerPacket) = ");
+  Serial.println(sizeof(ControllerPacket));
+
   lastLoopStartTime = millis();
 }
 
@@ -854,13 +914,13 @@ void loop() {
   }
 
   wdt_reset();
-  Usb.Task();
+  recieveWioData();
   canRetry();
   ReSendINIT();
   pulseTimeObserve();
   sendPulseCan(false);
 
-  bool isConnected = PS4.connected();
+  bool isConnected = wioConnected();
 
   //*****接続状態のエッジ検出*****
   if (Pad1_wasConnected != isConnected) {
@@ -873,12 +933,10 @@ void loop() {
       if ((unsigned long)(millis() - lastDisconnectTime) >= needSHAREButtonTime) {
         emergencyStopLatched = true;
       }
-      clearButtons();
-      setLEDColor();
     }
     Pad1_wasConnected = isConnected;
   }
-  Pad2ConnectState();
+
 
   //*****接続されていないときはloop先頭に戻る*****
   if (!isConnected) {
@@ -899,9 +957,9 @@ void loop() {
   checkPulseButtons();
   checkBucket();
 
-  float vx = readStickRawValue(PS4.getAnalogHat(RightHatX), false);
-  float vy = readStickRawValue(PS4.getAnalogHat(RightHatY), true);
-  float omega = readStickRawValue(PS4.getAnalogHat(LeftHatX), false);
+  float vx = readStickRawValue(controller.rightX, false);
+  float vy = readStickRawValue(controller.rightY, true);
+  float omega = readStickRawValue(controller.leftX, false);
 
   float speedScale = getSpeedScale();
   vx *= speedScale;
@@ -913,4 +971,6 @@ void loop() {
   printOmniValue();
 
   ReSendSpeed();
+
+  lastButtonsState = controller.buttons;
 }
