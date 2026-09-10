@@ -171,6 +171,12 @@ const unsigned long canFailSendInterval = 250;
 //*****オムニをprintするか*****
 const bool printOmni = true;
 
+//*****速度倍率_低速*****
+const float slowSpeedScale = 0.4f;
+
+//*****速度倍率_高速*****
+const float fastSpeedScale = 1.5f;
+
 /**************************************************************************************************/
 //配列
 /**************************************************************************************************/
@@ -339,18 +345,18 @@ void ReSendINIT(void) {
 
 //*****スルーレート（）*****
 void applySlewLimit(void) {
-  int RPMLimitPerFlame = (RPMLimitPerSec * speedSendInterval) / 1000;
-  if (RPMLimitPerFlame <= 0) {
-    RPMLimitPerFlame = 1;
+  int RPMLimitPerFrame = (RPMLimitPerSec * speedSendInterval) / 1000;
+  if (RPMLimitPerFrame <= 0) {
+    RPMLimitPerFrame = 1;
   }
   for (int i = 0; i < omniCount; i++) {
     if (downScaleRPM[i] >= actualSendValues[i]) {
-      actualSendValues[i] += RPMLimitPerFlame;
+      actualSendValues[i] += RPMLimitPerFrame;
       if (downScaleRPM[i] <= actualSendValues[i]) {
         actualSendValues[i] = downScaleRPM[i];
       }
     } else if (downScaleRPM[i] <= actualSendValues[i]) {
-      actualSendValues[i] -= RPMLimitPerFlame;
+      actualSendValues[i] -= RPMLimitPerFrame;
       if (downScaleRPM[i] >= actualSendValues[i]) {
         actualSendValues[i] = downScaleRPM[i];
       }
@@ -690,6 +696,21 @@ void printCanResultName(byte result) {
   }
 }
 
+//*****高速/低速用*****
+float getSpeedScale(void) {
+  //bool slow = (controler.buttons >> btnBit_R1) & 1;
+  //bool fast = (controler.buttons >> btnBit_L1) & 1;
+  bool slow = PS4.getButtonPress(R1);
+  bool fast = PS4.getButtonPress(L1);
+  if (slow == fast) {
+    return 1.0f;
+  } else if (slow) {
+    return slowSpeedScale;
+  } else {
+    return fastSpeedScale;
+  }
+}
+
 /**************************************************************************************************/
 //Setup
 /**************************************************************************************************/
@@ -754,6 +775,11 @@ void loop() {
   float vx = readStickRawValue(PS4.getAnalogHat(RightHatX), false);
   float vy = readStickRawValue(PS4.getAnalogHat(RightHatY), true);
   float omega = readStickRawValue(PS4.getAnalogHat(LeftHatX), false);
+
+  float speedScale = getSpeedScale();
+  vx *= speedScale;
+  vy *= speedScale;
+  omega *= speedScale;
 
   calcRawRPM(vx, vy, omega);
   scaleDown();
