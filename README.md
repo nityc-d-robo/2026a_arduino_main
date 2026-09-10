@@ -1,0 +1,28 @@
+# 9/8のpushから変更内容をメモしていきたいと思う
+
+## 9/8 変更点
+* ソレノイドの規格に対応
+* motorNodesの中身を現在の機構に合わせて修正
+    * 2スト:2つ
+    * 4スト:2つ
+    * バケツ:1つ
+* ボタンの再マッピング（仮）
+* モーターが消えたため，bucketChargeActive(),allSystemOff(),ReSendSystemOff()を削除
+* rotateMaxRPMを80->100に変更
+* actualSendValuesをprintOmniValue()に追加
+* Serialが大変なことになってたので，とりあえずcanSendChecker()の中で定期的にログ（SUCCESS,FAIL）を送るようにした
+
+## 9/8追加
+* typeIdをconstではなくmotorNodes構造体に追加<br>
+<font color="red">注：typeIdが変わるとその下のビット演算が変わるのでそこを留意する<font>
+* emergencyStop()にsendAllZero()を追加
+
+## 9/10 変更点
+* applySlewLimitのRPMLimitPerFlameが0未満にならないように，下回ると1にする処理を追加
+* printMcpError()やprintCanResultName()などをcanSendCheckerに追加し，どのようなエラーが出て"CAN FAIL"になっているかをprint
+* constでbool printOmniを追加し，不要になった時にfalseにするだけで消せるようにしたserialprintの中身を
+* printOmniの表示方法をちょっと修正
+* sendSpeedCanとstartPulseのsendValueを(unsigned int)にキャスト（こうしないとどうやら不安定になるらしい）
+
+## 9/10 追加
+* speedScaleを追加し，R1で低速，L1で高速になるようにした
