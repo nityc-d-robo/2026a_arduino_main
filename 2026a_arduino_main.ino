@@ -168,6 +168,9 @@ unsigned long lastCanFailSendTime = 0;
 //FAILの送信インターバル
 const unsigned long canFailSendInterval = 250;
 
+//*****オムニをprintするか*****
+const bool printOmni = true;
+
 /**************************************************************************************************/
 //配列
 /**************************************************************************************************/
@@ -247,7 +250,8 @@ bool resolveCanId(byte targetNode, byte funcCode, unsigned long &canId) {
 
 //*****canFailCountをリセット/+1する関数
 bool canSendChecker(unsigned long canId, byte data[8]) {
-  if (CAN0.sendMsgBuf(canId, 0, 8, data) == CAN_OK) {
+  byte result = CAN0.sendMsgBuf(canId, 0, 8, data);
+  if (result == CAN_OK) {
     if ((unsigned long)(millis() - lastCanSuccessSendTime) >= canSuccessSendInterval) {
       lastCanSuccessSendTime = millis();
       Serial.println("CAN SEND SUCCESS");
@@ -258,6 +262,14 @@ bool canSendChecker(unsigned long canId, byte data[8]) {
     if ((unsigned long)(millis() - lastCanFailSendTime) >= canFailSendInterval) {
       lastCanFailSendTime = millis();
       Serial.println("CAN SEND FAILED");
+      Serial.print("errorCountTX = ");
+      Serial.println(CAN0.errorCountTX());
+      Serial.print("errorCountRX = ");
+      Serial.println(CAN0.errorCountRX());
+      
+      byte eflg = CAN0.getError();
+      printMcpError(eflg);
+      printCanResultName(result);
     }
     canFailCount++;
     if (canFailCount >= maxCanFailCount) {
@@ -328,6 +340,9 @@ void ReSendINIT(void) {
 //*****スルーレート（）*****
 void applySlewLimit(void) {
   int RPMLimitPerFlame = (RPMLimitPerSec * speedSendInterval) / 1000;
+  if (RPMLimitPerFlame <= 0) {
+    RPMLimitPerFlame = 1;
+  }
   for (int i = 0; i < omniCount; i++) {
     if (downScaleRPM[i] >= actualSendValues[i]) {
       actualSendValues[i] += RPMLimitPerFlame;
@@ -417,7 +432,7 @@ void sendSpeedCan(void) {
       if (!resolveCanId(targetNode, funcCode, canId)) {
         continue;
       }
-      byte data[8] = {1, (byte)((sendValue >> 8) & 0xFF), (byte)(sendValue & 0xFF), 0, 0, 0, 0, 0};
+      byte data[8] = {1, (byte)(((unsigned int)sendValue >> 8) & 0xFF), (byte)(sendValue & 0xFF), 0, 0, 0, 0, 0};
       canSendChecker(canId, data);
     }
   }
@@ -438,6 +453,9 @@ void ReSendSpeed(void) {
 
 //*****RPM表示*****
 void printOmniValue(void) {
+  if (!printOmni) {
+    return;
+  }
   if((unsigned long)(millis() - lastDebugPrintTime) < debugPrintInterval) {
     return;
   }
@@ -445,11 +463,11 @@ void printOmniValue(void) {
   Serial.println("**** OMNI RPM VALUE *****");
   for (int i = 0; i < omniCount; i++) {
     Serial.print(omni[i].name);
-    Serial.print(":rawValue = ");
+    Serial.print("/");
     Serial.print(rawRPM[i]);
-    Serial.print(" -> downScaleValue = ");
+    Serial.print("/");
     Serial.print(downScaleRPM[i]);
-    Serial.print(" -> actualSendValue = ");
+    Serial.print("/");
     Serial.println(actualSendValues[i]);
   }
 }
@@ -516,7 +534,7 @@ void startPulse(byte index) {
     return;
   }
   int sendValue = pulseCommands[index].pulseValue;
-  byte data[8] = {1, (byte)((sendValue >> 8) & 0xFF), (byte)(sendValue & 0xFF), 0, 0, 0, 0, 0};
+  byte data[8] = {1, (byte)(((unsigned int)sendValue >> 8) & 0xFF), (byte)(sendValue & 0xFF), 0, 0, 0, 0, 0};
   if (canSendChecker(canId, data)) {
     pulseCommandsStates[index] = true;
     pulseUntilMs[index] = millis() + pulseCommands[index].sendPulseTimeLength;
@@ -612,6 +630,63 @@ void sendAllZero(void) {
     }
     byte data[8] = {1, 0, 0, 0, 0, 0, 0, 0};
     canSendChecker(canId, data);
+  }
+}
+
+//*****CANエラー種別のプリント*****
+void printMcpError(byte eflg) {
+  bool printed = false;
+
+  if (eflg & MCP_EFLG_EWARN) {
+    Serial.println("エラー警告:TEC or RECが警告レベルに到達");
+    printed = true;
+  }
+  if (eflg & MCP_EFLG_RXWAR) {
+    Serial.println("受信警告:エラー増加");
+    printed = true;
+  }
+  if (eflg & MCP_EFLG_TXWAR) {
+    Serial.println("送信警告:エラー増加");
+    printed = true;
+  }
+  if (eflg & MCP_EFLG_TXEP) {
+    Serial.println("TX_エラー多発");
+    printed = true;
+  }
+  if (eflg & MCP_EFLG_RXEP) {
+    Serial.println("RX_エラー多発");
+    printed = true;
+  }
+  if (eflg & MCP_EFLG_TXBO) {
+    Serial.println("バスOFF，送信不可");
+    printed = true;
+  }
+  if (eflg & MCP_EFLG_RX0OVR) {
+    Serial.println("RX0:OVERFLOW");
+    printed = true;
+  }
+  if (eflg & MCP_EFLG_RX1OVR) {
+    Serial.println("RX1:OVERFLOW");
+    printed = true;
+  }
+  if (!printed) {
+    Serial.println("None");
+  }
+}
+
+//*****sendMsgBufの戻り値*****
+void printCanResultName(byte result) {
+  if (result == CAN_FAILINIT) {
+    Serial.println("初期化失敗");
+  }
+  if (result == CAN_FAILTX) {
+    Serial.println("送信失敗");
+  }
+  if (result == CAN_GETTXBFTIMEOUT) {
+    Serial.println("送信バッファを取得できない");
+  }
+  if (result == CAN_SENDMSGTIMEOUT) {
+    Serial.println("送信バッファは確保，送信がタイムアウト");
   }
 }
 
