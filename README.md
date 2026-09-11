@@ -29,3 +29,7 @@
 * コントローラー切断時needSHAREButtonTime以上経過すると，SHAREボタンを押さないと動かなくなる（非常停止継続）ようにした
 * sendCANStop()を追加し，emergencyStop()とloop内の「接続状態のエッジ検出」のif文の中での0x00送信を共通の関数にまとめた
 * unlockEmergency()のemergencyStopLatchedのtrue/falseの位置変更・修正
+
+## 9/11 追記
+* setup()にwioSerial.beginを追加（これないと動かん）
+<font color="red">ボーレートは要検討！</font>

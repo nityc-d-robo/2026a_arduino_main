@@ -853,6 +853,7 @@ void ReSendAllZero(void) {
 /**************************************************************************************************/
 void setup() {
   Serial.begin(115200);
+  wioSerial.begin(115200);
   pinMode(10, OUTPUT);
   digitalWrite(10, HIGH);
   pinMode(CAN_CS_PIN, OUTPUT);
