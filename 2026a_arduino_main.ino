@@ -906,7 +906,7 @@ void loop() {
 
 
   //*****接続されていないときはloop先頭に戻る*****
-  if (!isConnected()) {
+  if (!isConnected) {
     ReSendOmniStop();
     ReSendAllZero();
     setPulsesEndTime();
