@@ -14,7 +14,7 @@
 
 ## 9/8追加
 * typeIdをconstではなくmotorNodes構造体に追加<br>
-<font color="red">注：typeIdが変わるとその下のビット演算が変わるのでそこを留意する<font>
+<font color="red">注：typeIdが変わるとその下のビット演算が変わるのでそこを留意する</font>
 * emergencyStop()にsendAllZero()を追加
 
 ## 9/10 変更点
@@ -26,3 +26,10 @@
 
 ## 9/10 追加
 * speedScaleを追加し，R1で低速，L1で高速になるようにした
+
+## 9/11 変更点
+* ReSendAllZeroを(!PS4.connected)の中に追加し，コントローラの接続が切れたときに0を送り続けるようにした
+* sendINITをemergencyStopLatchedがtrueの時はreturnするようにした（非常停止時にINITしないように ※要検討）
+* コントローラー切断時needSHAREButtonTime以上経過すると，SHAREボタンを押さないと動かなくなる（非常停止継続）ようにした
+* sendCANStop()を追加し，emergencyStop()とloop内の「接続状態のエッジ検出」のif文の中での0x00送信を共通の関数にまとめた
+* unlockEmergency()のemergencyStopLatchedのtrue/falseの位置変更・修正

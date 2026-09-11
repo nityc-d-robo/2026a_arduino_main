@@ -53,13 +53,13 @@ struct OmniWheel {
 OmniWheel omni[] {
   {0.7071f, 0.7071f, 1.0f, 0, "FL"},
   {0.7071f, -0.7071f, 1.0f, 1, "FR"},
-  {-0.7071f, -0.7071f, 1.0f, 2, "RR"},
-  {-0.7071f, 0.7071f, 1.0f, 3, "RL"}
+  { -0.7071f, -0.7071f, 1.0f, 2, "RR"},
+  { -0.7071f, 0.7071f, 1.0f, 3, "RL"}
 };
 
 //*****エアシリンダー用の構造体*****
 struct PulseButtonCommand {
-  ButtonEnum button;         
+  ButtonEnum button;
   byte funcCode;
   byte targetNode;
   int pulseValue;
@@ -168,6 +168,12 @@ unsigned long lastCanFailSendTime = 0;
 //FAILの送信インターバル
 const unsigned long canFailSendInterval = 250;
 
+//ZEROを最後に送った時間
+unsigned long lastZeroSendTime = 0;
+
+//ZEROの送信インターバル
+const unsigned long zeroSendInterval = 50;
+
 //*****オムニをprintするか*****
 const bool printOmni = true;
 
@@ -176,6 +182,15 @@ const float slowSpeedScale = 0.4f;
 
 //*****速度倍率_高速*****
 const float fastSpeedScale = 1.5f;
+
+//*****接続診断（切断）
+bool wasConnected = false;
+
+//*****切断した時点の時間*****
+unsigned long lastDisconnectTime = 0;
+
+//*****切断後SHAREを押さないと動作しなくなる時間*****
+const unsigned long needSHAREButtonTime = 1000;
 
 /**************************************************************************************************/
 //配列
@@ -244,7 +259,7 @@ bool resolveCanId(byte targetNode, byte funcCode, unsigned long &canId) {
     if (typeId > 7) {
       return false;
     } else if (nodeNum > 3) {
-      return false; 
+      return false;
     } else if (deviceId > 7) {
       return false;
     } else {
@@ -272,7 +287,7 @@ bool canSendChecker(unsigned long canId, byte data[8]) {
       Serial.println(CAN0.errorCountTX());
       Serial.print("errorCountRX = ");
       Serial.println(CAN0.errorCountRX());
-      
+
       byte eflg = CAN0.getError();
       printMcpError(eflg);
       printCanResultName(result);
@@ -307,9 +322,69 @@ void canRetry(void) {
   }
 }
 
+//*****CANエラー種別のプリント*****
+void printMcpError(byte eflg) {
+  bool printed = false;
+
+  if (eflg & MCP_EFLG_EWARN) {
+    Serial.println("エラー警告:TEC or RECが警告レベルに到達");
+    printed = true;
+  }
+  if (eflg & MCP_EFLG_RXWAR) {
+    Serial.println("受信警告:エラー増加");
+    printed = true;
+  }
+  if (eflg & MCP_EFLG_TXWAR) {
+    Serial.println("送信警告:エラー増加");
+    printed = true;
+  }
+  if (eflg & MCP_EFLG_TXEP) {
+    Serial.println("TX_エラー多発");
+    printed = true;
+  }
+  if (eflg & MCP_EFLG_RXEP) {
+    Serial.println("RX_エラー多発");
+    printed = true;
+  }
+  if (eflg & MCP_EFLG_TXBO) {
+    Serial.println("バスOFF，送信不可");
+    printed = true;
+  }
+  if (eflg & MCP_EFLG_RX0OVR) {
+    Serial.println("RX0:OVERFLOW");
+    printed = true;
+  }
+  if (eflg & MCP_EFLG_RX1OVR) {
+    Serial.println("RX1:OVERFLOW");
+    printed = true;
+  }
+  if (!printed) {
+    Serial.println("None");
+  }
+}
+
+//*****sendMsgBufの戻り値*****
+void printCanResultName(byte result) {
+  if (result == CAN_FAILINIT) {
+    Serial.println("初期化失敗");
+  }
+  if (result == CAN_FAILTX) {
+    Serial.println("送信失敗");
+  }
+  if (result == CAN_GETTXBFTIMEOUT) {
+    Serial.println("送信バッファを取得できない");
+  }
+  if (result == CAN_SENDMSGTIMEOUT) {
+    Serial.println("送信バッファは確保，送信がタイムアウト");
+  }
+}
+
 //*****INIT送信*****
 void sendINIT(void) {
   if (canReady) {
+    if (emergencyStopLatched) {
+      return;
+    }
     for (int i = 0; i < motorNodesCount; i++) {
       if (!canReady) {
         break;
@@ -423,7 +498,7 @@ void scaleDown(void) {
 
 //*****RPMのCAN送信*****
 void sendSpeedCan(void) {
-  for (int i= 0; i < omniCount; i++) {
+  for (int i = 0; i < omniCount; i++) {
     if (!canReady) {
       if ((unsigned long)(millis() - lastCanFailSendTime) >= canFailSendInterval) {
         lastCanFailSendTime = millis();
@@ -462,7 +537,7 @@ void printOmniValue(void) {
   if (!printOmni) {
     return;
   }
-  if((unsigned long)(millis() - lastDebugPrintTime) < debugPrintInterval) {
+  if ((unsigned long)(millis() - lastDebugPrintTime) < debugPrintInterval) {
     return;
   }
   lastDebugPrintTime = millis();
@@ -475,6 +550,21 @@ void printOmniValue(void) {
     Serial.print(downScaleRPM[i]);
     Serial.print("/");
     Serial.println(actualSendValues[i]);
+  }
+}
+
+//*****高速/低速/通常を返す関数*****
+float getSpeedScale(void) {
+  //bool slow = (controler.buttons >> btnBit_R1) & 1;
+  //bool fast = (controler.buttons >> btnBit_L1) & 1;
+  bool slow = PS4.getButtonPress(R1);
+  bool fast = PS4.getButtonPress(L1);
+  if (slow == fast) {
+    return 1.0f;
+  } else if (slow) {
+    return slowSpeedScale;
+  } else {
+    return fastSpeedScale;
   }
 }
 
@@ -505,7 +595,7 @@ void checkPulseButtons(void) {
   bool CIRCLE_Clicked = PS4.getButtonClick(CIRCLE);
   bool RIGHT_Clicked = PS4.getButtonClick(RIGHT);
   bool LEFT_Clicked = PS4.getButtonClick(LEFT);
-  
+
   for (int i = 0; i < pulseCommandsCount; i++) {
     bool pulseButtonClicked = false;
 
@@ -520,7 +610,7 @@ void checkPulseButtons(void) {
     } else if (pulseCommands[i].button == LEFT) {
       pulseButtonClicked = LEFT_Clicked;
     }
-    
+
     if (pulseButtonClicked) {
       startPulse(i);
     }
@@ -585,6 +675,18 @@ void setPulsesEndTime(void) {
   }
 }
 
+//*****非常停止共通関数*****
+void sendCANStop(void) {
+  if (!canReady) {
+    Serial.println("CAN FAILS. EMERGENCY SEND SKIPPED");
+  } else {
+    unsigned long canId = (0x00 << 8) | 0x00;
+    byte emergencyData[8] = {0};
+    emergencyData[0] = 1;
+    canSendChecker(canId, emergencyData);
+  }
+}
+
 //*****非常停止*****
 void emergencyStop(void) {
   bool psClicked = PS4.getButtonClick(PS);
@@ -594,14 +696,8 @@ void emergencyStop(void) {
     autoStopPulses();
     stopOmniNow();
     sendAllZero();
-    if (!canReady) {
-      Serial.println("CAN FAILS. EMERGENCY SEND SKIPPED");
-    } else {
-      unsigned long canId = (0x00 << 8) | 0x00;
-      byte emergencyData[8] = {0};
-      emergencyData[0] = 1;
-      canSendChecker(canId, emergencyData);
-    }
+
+    sendCANStop();
   }
 }
 
@@ -612,14 +708,18 @@ void unlockEmergency(void) {
   if (!shareClicked || !emergencyStopLatched) {
     return;
   }
-  emergencyStopLatched = false;
   if (!canReady) {
     Serial.println("CAN FAILS. UNLOCK EMERGENCY SEND SKIPPED");
+    emergencyStopLatched = true;
   } else {
     unsigned long canId = (0x03 << 8) | 0x00;
     byte unlockEmergencyData[8] = {0};
     unlockEmergencyData[0] = 1;
-    canSendChecker(canId, unlockEmergencyData);
+    if (!canSendChecker(canId, unlockEmergencyData)) {
+      emergencyStopLatched = true;
+    } else {
+      emergencyStopLatched = false;      
+    }
   }
 }
 
@@ -639,75 +739,14 @@ void sendAllZero(void) {
   }
 }
 
-//*****CANエラー種別のプリント*****
-void printMcpError(byte eflg) {
-  bool printed = false;
-
-  if (eflg & MCP_EFLG_EWARN) {
-    Serial.println("エラー警告:TEC or RECが警告レベルに到達");
-    printed = true;
+//*****全機構に0を送る*****
+void ReSendAllZero(void) {
+  if (!canReady) {
+    return;
   }
-  if (eflg & MCP_EFLG_RXWAR) {
-    Serial.println("受信警告:エラー増加");
-    printed = true;
-  }
-  if (eflg & MCP_EFLG_TXWAR) {
-    Serial.println("送信警告:エラー増加");
-    printed = true;
-  }
-  if (eflg & MCP_EFLG_TXEP) {
-    Serial.println("TX_エラー多発");
-    printed = true;
-  }
-  if (eflg & MCP_EFLG_RXEP) {
-    Serial.println("RX_エラー多発");
-    printed = true;
-  }
-  if (eflg & MCP_EFLG_TXBO) {
-    Serial.println("バスOFF，送信不可");
-    printed = true;
-  }
-  if (eflg & MCP_EFLG_RX0OVR) {
-    Serial.println("RX0:OVERFLOW");
-    printed = true;
-  }
-  if (eflg & MCP_EFLG_RX1OVR) {
-    Serial.println("RX1:OVERFLOW");
-    printed = true;
-  }
-  if (!printed) {
-    Serial.println("None");
-  }
-}
-
-//*****sendMsgBufの戻り値*****
-void printCanResultName(byte result) {
-  if (result == CAN_FAILINIT) {
-    Serial.println("初期化失敗");
-  }
-  if (result == CAN_FAILTX) {
-    Serial.println("送信失敗");
-  }
-  if (result == CAN_GETTXBFTIMEOUT) {
-    Serial.println("送信バッファを取得できない");
-  }
-  if (result == CAN_SENDMSGTIMEOUT) {
-    Serial.println("送信バッファは確保，送信がタイムアウト");
-  }
-}
-
-//*****高速/低速用*****
-float getSpeedScale(void) {
-  //bool slow = (controler.buttons >> btnBit_R1) & 1;
-  //bool fast = (controler.buttons >> btnBit_L1) & 1;
-  bool slow = PS4.getButtonPress(R1);
-  bool fast = PS4.getButtonPress(L1);
-  if (slow == fast) {
-    return 1.0f;
-  } else if (slow) {
-    return slowSpeedScale;
-  } else {
-    return fastSpeedScale;
+  if ((unsigned long)(millis() - lastZeroSendTime) >= zeroSendInterval) {
+    lastZeroSendTime = millis();
+    sendAllZero();
   }
 }
 
@@ -716,21 +755,22 @@ float getSpeedScale(void) {
 /**************************************************************************************************/
 void setup() {
   Serial.begin(115200);
-  pinMode(10, OUTPUT);          
+  pinMode(10, OUTPUT);
   digitalWrite(10, HIGH);
   pinMode(CAN_CS_PIN, OUTPUT);
-  digitalWrite(CAN_CS_PIN, HIGH);  
+  digitalWrite(CAN_CS_PIN, HIGH);
+  lastDisconnectTime = millis();
 
-//*****USB成功/失敗判定*****
+  //*****USB成功/失敗判定*****
   if (Usb.Init() == -1) {
     Serial.println("USB host did not start.");
     while (1);
   } else {
     Serial.println("USB Host Ready.");
-    
+
   }
 
-//*****CAN成功/失敗判定*****
+  //*****CAN成功/失敗判定*****
   if (CAN0.begin(MCP_ANY, CAN_BUS_SPEED, MCP2515_CLOCK) == CAN_OK) {
     Serial.println("CAN_Successful");
     CAN0.setMode(MCP_NORMAL);
@@ -739,7 +779,7 @@ void setup() {
     Serial.println("CAN_Failed");
     canReady = false;
   }
-  sendINIT(); 
+  sendINIT();
   sendAllZero();
 }
 
@@ -753,20 +793,37 @@ void loop() {
   canRetry();
   ReSendINIT();
   autoStopPulses();
-  
-//*****接続されていないときはloop先頭に戻る*****
-  if (!PS4.connected()) {
+
+  bool isConnected = PS4.connected();
+
+  //*****接続状態のエッジ検出*****
+  if (wasConnected != isConnected) {
+    if (!isConnected) {
+      lastDisconnectTime = millis();
+      ReSendAllZero();
+      sendCANStop();
+    } else {
+      if ((unsigned long)(millis() - lastDisconnectTime) >= needSHAREButtonTime) {
+        emergencyStopLatched = true;
+      }
+    }
+    wasConnected = isConnected;
+  }
+
+  //*****接続されていないときはloop先頭に戻る*****
+  if (!isConnected) {
     ReSendOmniStop();
+    ReSendAllZero();
     setPulsesEndTime();
     autoStopPulses();
     return;
   }
-    
+
   emergencyStop();
   unlockEmergency();
 
   if (emergencyStopLatched) {
-    ReSendSpeed();    
+    ReSendSpeed();
     return;
   }
 
