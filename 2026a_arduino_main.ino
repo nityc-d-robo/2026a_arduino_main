@@ -846,6 +846,7 @@ void setup() {
   wdt_disable();
   wdt_enable(WDTO_2S);
   Serial.begin(115200);
+  wioSerial.begin(115200);
   pinMode(10, OUTPUT);
   digitalWrite(10, HIGH);
   pinMode(CAN_CS_PIN, OUTPUT);
