@@ -28,6 +28,7 @@
 * speedScaleを追加し，R1で低速，L1で高速になるようにした
 
 ## 9/11 変更点
+* 関数位置の調整（高速/低速用関数など）
 * ReSendAllZeroを(!PS4.connected)の中に追加し，コントローラの接続が切れたときに0を送り続けるようにした
 * sendINITをemergencyStopLatchedがtrueの時はreturnするようにした（非常停止時にINITしないように ※要検討）
 * コントローラー切断時needSHAREButtonTime以上経過すると，SHAREボタンを押さないと動かなくなる（非常停止継続）ようにした
