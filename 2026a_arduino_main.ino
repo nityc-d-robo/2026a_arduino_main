@@ -590,7 +590,10 @@ void ReSendOmniStop(void) {
 
 //*****エアシリンダーのボタンが押されたかチェックする関数*****
 void checkPulseButtons(void) {
-  bool TRIANGLE_Clicked = PS4.getButtonClick(TRIANGLE);
+  bool TRIANGLE_Clicked = false;
+  if (PS4_2.connected() && PS4_2.getButtonClick(TRIANGLE)) {
+    TRIANGLE_Clicked = true;
+  }
   bool SQUARE_Clicked = PS4.getButtonClick(SQUARE);
   bool CIRCLE_Clicked = PS4.getButtonClick(CIRCLE);
   bool RIGHT_Clicked = PS4.getButtonClick(RIGHT);
@@ -692,6 +695,8 @@ void emergencyStop(void) {
   bool psClicked = PS4.getButtonClick(PS);
   if (psClicked && !emergencyStopLatched) {
     emergencyStopLatched = true;
+    setLEDColor();
+    
     setPulsesEndTime();
     autoStopPulses();
     stopOmniNow();
@@ -718,8 +723,17 @@ void unlockEmergency(void) {
     if (!canSendChecker(canId, unlockEmergencyData)) {
       emergencyStopLatched = true;
     } else {
-      emergencyStopLatched = false;      
+      emergencyStopLatched = false;
+      clearButtons(); 
+      setLEDColor();   
     }
+  }
+}
+
+//*****非常停止解除時に読み取っていた値を消費する*****
+void clearButtons(void) {
+  for (int i = 0; i < pulseCommandsCount; i++) {
+    PS4.getButtonClick(pulseCommands[i].button);
   }
 }
 
@@ -750,6 +764,15 @@ void ReSendAllZero(void) {
   }
 }
 
+//*****コントローラーのLED変化*****
+void setLEDColor(void) {
+  if (emergencyStopLatched) {
+    PS4.setLed(Red);
+  } else {
+    PS4.setLed(Blue);
+  }
+}
+
 /**************************************************************************************************/
 //Setup
 /**************************************************************************************************/
@@ -759,6 +782,7 @@ void setup() {
   digitalWrite(10, HIGH);
   pinMode(CAN_CS_PIN, OUTPUT);
   digitalWrite(CAN_CS_PIN, HIGH);
+  setLEDColor();
   lastDisconnectTime = millis();
 
   //*****USB成功/失敗判定*****
@@ -805,6 +829,7 @@ void loop() {
     } else {
       if ((unsigned long)(millis() - lastDisconnectTime) >= needSHAREButtonTime) {
         emergencyStopLatched = true;
+        setLEDColor();
       }
     }
     wasConnected = isConnected;

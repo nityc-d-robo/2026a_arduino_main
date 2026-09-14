@@ -34,3 +34,8 @@
 * コントローラー切断時needSHAREButtonTime以上経過すると，SHAREボタンを押さないと動かなくなる（非常停止継続）ようにした
 * sendCANStop()を追加し，emergencyStop()とloop内の「接続状態のエッジ検出」のif文の中での0x00送信を共通の関数にまとめた
 * unlockEmergency()のemergencyStopLatchedのtrue/falseの位置変更・修正
+
+## 9/14 変更点
+* clearButtons()を追加し，非常停止時に溜まっていたクリックの情報を，解除時に（SHAREクリック時に）消費して意図しないエアシリンダーの動作を防止
+* emergencyStopLatchedの状態に合わせてコントローラーのLEDを赤/青になるように変更（おそらくwio側では実装しない/できない）
+* バケツ用のボタンをPS4_2に変更し，2台目に対応
