@@ -808,6 +808,7 @@ void unlockEmergency(void) {
     }
   }
 }
+*/
 
 //*****何らかの原因でMegaが再起動したとき0を送る*****
 void sendAllZero(void) {
