@@ -38,3 +38,11 @@
 * clearButtons()を追加し，非常停止時に溜まっていたクリックの情報を，解除時に（SHAREクリック時に）消費して意図しないエアシリンダーの動作を防止
 * バケツ用のボタンをPS4_2に変更し，2台目に対応
 * LEDは多分wioではできないので削除
+
+## 9/14 rebase後追記
+* clearButtons()を以下のように変更<br>
+```C++
+lastButtonsState = controller.buttons;
+```
+* 2つ目のコントローラーの値を読む関数bucketButtonClicked()を追加<br>
+<font color="red">関数の中身は送る方針が決まったら変更する</font>

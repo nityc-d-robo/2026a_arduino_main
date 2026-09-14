@@ -662,16 +662,16 @@ void ReSendOmniStop(void) {
   }
 }
 
+bool bucketButtonClicked(void) {
+  //*****何かしら二つ目のコントローラー（バケツ用ボタン？）を読み取る*****
+  
+  //*****一旦falseにしておく*****
+  return false;
+}
+
 //*****エアシリンダーのボタンが押されたかチェックする関数*****
 void checkPulseButtons(void) {
-  /*
-  bool TRIANGLE_Clicked = false;
-  if (PS4_2.connected() && PS4_2.getButtonClick(TRIANGLE)) {
-    TRIANGLE_Clicked = true;
-  }
-  */
-
-  bool TRIANGLE_Clicked = wioButtonClicked(btnBit_TRIANGLE);
+  bool TRIANGLE_Clicked = bucketButtonClicked();
   bool SQUARE_Clicked = wioButtonClicked(btnBit_SQUARE);
   bool CIRCLE_Clicked = wioButtonClicked(btnBit_CIRCLE);
   bool RIGHT_Clicked = wioButtonClicked(btnBit_RIGHT);
@@ -801,22 +801,10 @@ void unlockEmergency(void) {
       emergencyStopLatched = true;
     } else {
       emergencyStopLatched = false;
-      //未実装  clearButtons(); 
+      lastButtonsState = controller.buttons; 
     }
   }
 }
-/*
-//*****非常停止解除時に読み取っていた値を消費する*****
-void clearButtons(void) {
-  for (int i = 0; i < pulseCommandsCount; i++) {
-    if (pulseCommands[i].button == TRIANGLE) {
-      PS4_2.getButtonClick(TRIANGLE);
-    } else {
-      PS4.getButtonClick(pulseCommands[i].button);
-    }
-  }
-}
-*/
 
 //*****何らかの原因でMegaが再起動したとき0を送る*****
 void sendAllZero(void) {
