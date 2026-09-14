@@ -754,12 +754,6 @@ void checkPulseButtons(void) {
   }
 }
 
-void checkBucket(void) {
-  if (PS4.getButtonClick(R2)) {
-    pulseOn[Bucket] = !pulseOn[Bucket];
-  }
-}
-
 //*****非常停止共通関数*****
 void sendCANStop(void) {
   if (!canReady) {
@@ -808,7 +802,6 @@ void unlockEmergency(void) {
     }
   }
 }
-*/
 
 //*****何らかの原因でMegaが再起動したとき0を送る*****
 void sendAllZero(void) {
