@@ -773,7 +773,6 @@ void emergencyStop(void) {
   bool psClicked = wioButtonClicked(btnBit_PS);
   if (psClicked && !emergencyStopLatched) {
     emergencyStopLatched = true;
-    setLEDColor();
     
     setPulsesEndTime();
     autoStopPulses();
@@ -802,12 +801,11 @@ void unlockEmergency(void) {
       emergencyStopLatched = true;
     } else {
       emergencyStopLatched = false;
-      clearButtons(); 
-      setLEDColor();   
+      //未実装  clearButtons(); 
     }
   }
 }
-
+/*
 //*****非常停止解除時に読み取っていた値を消費する*****
 void clearButtons(void) {
   for (int i = 0; i < pulseCommandsCount; i++) {
@@ -818,6 +816,7 @@ void clearButtons(void) {
     }
   }
 }
+*/
 
 //*****何らかの原因でMegaが再起動したとき0を送る*****
 void sendAllZero(void) {
@@ -844,27 +843,6 @@ void ReSendAllZero(void) {
     lastZeroSendTime = millis();
     sendAllZero();
   }
-}
-
-//*****コントローラーのLED変化*****
-void setLEDColor(void) {
-  if (!PS4.connected()) {
-    return;
-  }
-  if (emergencyStopLatched) {
-    PS4.setLed(Red);
-  } else {
-    PS4.setLed(Blue);
-  }
-}
-
-//*****2台目コントローラーの接続判定*****
-void Pad2ConnectState(void) {
-  bool isConnected = PS4_2.connected();
-  if (!Pad2_wasConnected && isConnected) {
-    PS4_2.setLed(Green);
-  }
-  Pad2_wasConnected = isConnected;
 }
 
 /**************************************************************************************************/
