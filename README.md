@@ -47,3 +47,11 @@
 ## 9/15 変更点
 * F()マクロをSerial.printに追加
 * translateMaxRPMを170から150に，rotateMaxRPMを100から90に
+
+## 9/15 追記
+* PS4_2のclearButtons()への対応
+* PS4_2接続時に緑色LEDが点灯するようにした
+* loop内のsetLEDColor()などの位置変更
+* loop()が1周するまでの最大時間を記録する処理をloopに追加
+* 何らかの原因ででリセットされてsetup()に戻った時，リセットされた理由をprintする処理を追加
+* 先輩との調整後，translateMaxRPMを150から170に，rotateMaxRPMを90から100に変更，とりあえず確定

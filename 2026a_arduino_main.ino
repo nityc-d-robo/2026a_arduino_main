@@ -9,6 +9,8 @@ USB Usb;
 BTD Btd(&Usb);
 PS4BT PS4(&Btd);
 PS4BT PS4_2(&Btd);
+//PS4は1台目，先に接続されたコントローラー
+//PS4_2は2台目，次に接続されたコントローラー
 
 //*****エアシリンダーON*****
 const bool pulseOnValue = 1;
@@ -136,17 +138,19 @@ unsigned long lastDebugPrintTime = 0;
 //*****RPM表示のインターバル*****
 const unsigned long debugPrintInterval = 300;
 
+//***************************************************************************
 //*****並進最大RPM*****
-const int translateMaxRPM = 150;
+const int translateMaxRPM = 170;
 
 //*****回転最大RPM*****
-const int rotateMaxRPM = 90;
+const int rotateMaxRPM = 100;
 
 //*****最大RPM*****
 const int maxRPM = 200;
 
 //*****毎秒変化できる最大RPM*****
 const int RPMLimitPerSec = 400;
+//****************************************************************************
 
 //*****正規化用の係数の絶対値*****
 const float coefValue = 0.7071f;
@@ -185,13 +189,21 @@ const float slowSpeedScale = 0.4f;
 const float fastSpeedScale = 1.5f;
 
 //*****接続診断（切断）
-bool wasConnected = false;
+bool Pad1_wasConnected = false;
+bool Pad2_wasConnected = false;
 
 //*****切断した時点の時間*****
 unsigned long lastDisconnectTime = 0;
 
 //*****切断後SHAREを押さないと動作しなくなる時間*****
 const unsigned long needSHAREButtonTime = 1000;
+
+
+
+unsigned long lastLoopStartTime = 0;
+unsigned long maxLoopDuration = 0;
+
+
 
 /**************************************************************************************************/
 //配列
@@ -702,7 +714,11 @@ void unlockEmergency(void) {
 //*****非常停止解除時に読み取っていた値を消費する*****
 void clearButtons(void) {
   for (int i = 0; i < pulseCommandsCount; i++) {
-    PS4.getButtonClick(pulseCommands[i].button);
+    if (pulseCommands[i].button == TRIANGLE) {
+      PS4_2.getButtonClick(TRIANGLE);
+    } else {
+      PS4.getButtonClick(pulseCommands[i].button);
+    }
   }
 }
 
@@ -742,10 +758,21 @@ void setLEDColor(void) {
   }
 }
 
+//*****2台目コントローラーの接続判定*****
+void Pad2ConnectState(void) {
+  bool isConnected = PS4_2.connected();
+  if (!Pad2_wasConnected && isConnected) {
+    PS4_2.setLed(Green);
+  }
+  Pad2_wasConnected = isConnected;
+}
+
 /**************************************************************************************************/
 //Setup
 /**************************************************************************************************/
 void setup() {
+  byte resetCause = MCUSR;
+  MCUSR = 0;
   wdt_disable();
   wdt_enable(WDTO_2S);
   Serial.begin(115200);
@@ -755,6 +782,28 @@ void setup() {
   digitalWrite(CAN_CS_PIN, HIGH);
   setLEDColor();
   lastDisconnectTime = millis();
+
+//*****リセットが行われたときに原因をprint
+  bool printed = false;
+  if (resetCause & (1 << WDRF)) {
+    Serial.println(F("Reset cause: WATCHDOG"));
+    printed = true;
+  }
+  if (resetCause & (1 << BORF)) {
+    Serial.println(F("Reset cause: BROWNOUT(電圧低下)"));
+    printed = true;
+  }
+  if (resetCause & (1 << PORF)) {
+    Serial.println(F("Reset cause: POWER ON"));
+    printed = true;
+  }
+  if (resetCause & (1 << EXTRF)) {
+    Serial.println(F("Reset cause: EXTERNAL(外部リセット)"));
+    printed = true;
+  }
+  if (!printed) {
+    Serial.println(F("Reset cause: None(正しく診断できていない)"));
+  }
 
   //*****USB成功/失敗判定*****
   if (Usb.Init() == -1) {
@@ -776,6 +825,7 @@ void setup() {
   }
   sendINIT();
   sendAllZero();
+  lastLoopStartTime = millis();
 }
 
 
@@ -783,6 +833,16 @@ void setup() {
 //loop
 /**************************************************************************************************/
 void loop() {
+
+  unsigned long now = millis();
+  unsigned long loopDuration = (unsigned long)(now - lastLoopStartTime);
+  lastLoopStartTime = now;
+  if (loopDuration > maxLoopDuration) {
+    maxLoopDuration = loopDuration;
+    Serial.print(F("NEW MAX LOOP TIME:"));
+    Serial.println(maxLoopDuration);
+  }
+  
   wdt_reset();
   Usb.Task();
   canRetry();
@@ -792,7 +852,7 @@ void loop() {
   bool isConnected = PS4.connected();
 
   //*****接続状態のエッジ検出*****
-  if (wasConnected != isConnected) {
+  if (Pad1_wasConnected != isConnected) {
     if (!isConnected) {
       lastDisconnectTime = millis();
       ReSendAllZero();
@@ -800,11 +860,13 @@ void loop() {
     } else {
       if ((unsigned long)(millis() - lastDisconnectTime) >= needSHAREButtonTime) {
         emergencyStopLatched = true;
-        setLEDColor();
       }
+      clearButtons();
+      setLEDColor();
     }
-    wasConnected = isConnected;
+    Pad1_wasConnected = isConnected;
   }
+  Pad2ConnectState();
 
   //*****接続されていないときはloop先頭に戻る*****
   if (!isConnected) {
