@@ -2,6 +2,7 @@
 #include <usbhub.h>
 #include <SPI.h>
 #include <mcp_can.h>
+#include <avr/wdt.h>
 
 //*****オブジェクト宣言*****
 USB Usb;
@@ -136,10 +137,10 @@ unsigned long lastDebugPrintTime = 0;
 const unsigned long debugPrintInterval = 300;
 
 //*****並進最大RPM*****
-const int translateMaxRPM = 170;
+const int translateMaxRPM = 150;
 
 //*****回転最大RPM*****
-const int rotateMaxRPM = 100;
+const int rotateMaxRPM = 90;
 
 //*****最大RPM*****
 const int maxRPM = 200;
@@ -215,38 +216,6 @@ unsigned long pulseUntilMs[pulseCommandsCount] = {0};
 //関数
 /**************************************************************************************************/
 
-//*****ボタンの名前を返す関数*****
-const char* buttonName(ButtonEnum b) {
-  switch (b) {
-    case TRIANGLE:
-      return "TRIANGLE";
-    case CIRCLE:
-      return "CIRCLE";
-    case CROSS:
-      return "CROSS";
-    case SQUARE:
-      return "SQUARE";
-    case L1:
-      return "L1";
-    case R1:
-      return "R1";
-    case L2:
-      return "L2";
-    case R2:
-      return "R2";
-    case LEFT:
-      return "LEFT";
-    case RIGHT:
-      return "RIGHT";
-    case SHARE:
-      return "SHARE";
-    case PS:
-      return "PS";
-    default:
-      return "Unknown_Button";
-  }
-}
-
 //*****canId共通関数*****
 bool resolveCanId(byte targetNode, byte funcCode, unsigned long &canId) {
   if (targetNode >= motorNodesCount) {
@@ -275,17 +244,17 @@ bool canSendChecker(unsigned long canId, byte data[8]) {
   if (result == CAN_OK) {
     if ((unsigned long)(millis() - lastCanSuccessSendTime) >= canSuccessSendInterval) {
       lastCanSuccessSendTime = millis();
-      Serial.println("CAN SEND SUCCESS");
+      Serial.println(F("CAN SEND SUCCESS"));
     }
     canFailCount = 0;
     return true;
   } else {
     if ((unsigned long)(millis() - lastCanFailSendTime) >= canFailSendInterval) {
       lastCanFailSendTime = millis();
-      Serial.println("CAN SEND FAILED");
-      Serial.print("errorCountTX = ");
+      Serial.println(F("CAN SEND FAILED"));
+      Serial.print(F("errorCountTX = "));
       Serial.println(CAN0.errorCountTX());
-      Serial.print("errorCountRX = ");
+      Serial.print(F("errorCountRX = "));
       Serial.println(CAN0.errorCountRX());
 
       byte eflg = CAN0.getError();
@@ -327,55 +296,55 @@ void printMcpError(byte eflg) {
   bool printed = false;
 
   if (eflg & MCP_EFLG_EWARN) {
-    Serial.println("エラー警告:TEC or RECが警告レベルに到達");
+    Serial.println(F("エラー警告:TEC or RECが警告レベルに到達"));
     printed = true;
   }
   if (eflg & MCP_EFLG_RXWAR) {
-    Serial.println("受信警告:エラー増加");
+    Serial.println(F("受信警告:エラー増加"));
     printed = true;
   }
   if (eflg & MCP_EFLG_TXWAR) {
-    Serial.println("送信警告:エラー増加");
+    Serial.println(F("送信警告:エラー増加"));
     printed = true;
   }
   if (eflg & MCP_EFLG_TXEP) {
-    Serial.println("TX_エラー多発");
+    Serial.println(F("TX_エラー多発"));
     printed = true;
   }
   if (eflg & MCP_EFLG_RXEP) {
-    Serial.println("RX_エラー多発");
+    Serial.println(F("RX_エラー多発"));
     printed = true;
   }
   if (eflg & MCP_EFLG_TXBO) {
-    Serial.println("バスOFF，送信不可");
+    Serial.println(F("バスOFF，送信不可"));
     printed = true;
   }
   if (eflg & MCP_EFLG_RX0OVR) {
-    Serial.println("RX0:OVERFLOW");
+    Serial.println(F("RX0:OVERFLOW"));
     printed = true;
   }
   if (eflg & MCP_EFLG_RX1OVR) {
-    Serial.println("RX1:OVERFLOW");
+    Serial.println(F("RX1:OVERFLOW"));
     printed = true;
   }
   if (!printed) {
-    Serial.println("None");
+    Serial.println(F("None"));
   }
 }
 
 //*****sendMsgBufの戻り値*****
 void printCanResultName(byte result) {
   if (result == CAN_FAILINIT) {
-    Serial.println("初期化失敗");
+    Serial.println(F("初期化失敗"));
   }
   if (result == CAN_FAILTX) {
-    Serial.println("送信失敗");
+    Serial.println(F("送信失敗"));
   }
   if (result == CAN_GETTXBFTIMEOUT) {
-    Serial.println("送信バッファを取得できない");
+    Serial.println(F("送信バッファを取得できない"));
   }
   if (result == CAN_SENDMSGTIMEOUT) {
-    Serial.println("送信バッファは確保，送信がタイムアウト");
+    Serial.println(F("送信バッファは確保，送信がタイムアウト"));
   }
 }
 
@@ -502,7 +471,7 @@ void sendSpeedCan(void) {
     if (!canReady) {
       if ((unsigned long)(millis() - lastCanFailSendTime) >= canFailSendInterval) {
         lastCanFailSendTime = millis();
-        Serial.println("CAN FAILS. RPM SEND SKIPPED");
+        Serial.println(F("CAN FAILS. RPM SEND SKIPPED"));
       }
       break;
     } else {
@@ -541,14 +510,14 @@ void printOmniValue(void) {
     return;
   }
   lastDebugPrintTime = millis();
-  Serial.println("**** OMNI RPM VALUE *****");
+  Serial.println(F("**** OMNI RPM VALUE *****"));
   for (int i = 0; i < omniCount; i++) {
     Serial.print(omni[i].name);
-    Serial.print("/");
+    Serial.print(F("/"));
     Serial.print(rawRPM[i]);
-    Serial.print("/");
+    Serial.print(F("/"));
     Serial.print(downScaleRPM[i]);
-    Serial.print("/");
+    Serial.print(F("/"));
     Serial.println(actualSendValues[i]);
   }
 }
@@ -623,7 +592,7 @@ void checkPulseButtons(void) {
 //*****エアシリンダーのボタンが押されるとON値を送信し、成功したら終了予定時刻をセット*****
 void startPulse(byte index) {
   if (!canReady) {
-    Serial.println("CAN FAILS. PULSE START SKIPPED");
+    Serial.println(F("CAN FAILS. PULSE START SKIPPED"));
     return;
   }
   byte targetNode = pulseCommands[index].targetNode;
@@ -681,7 +650,7 @@ void setPulsesEndTime(void) {
 //*****非常停止共通関数*****
 void sendCANStop(void) {
   if (!canReady) {
-    Serial.println("CAN FAILS. EMERGENCY SEND SKIPPED");
+    Serial.println(F("CAN FAILS. EMERGENCY SEND SKIPPED"));
   } else {
     unsigned long canId = (0x00 << 8) | 0x00;
     byte emergencyData[8] = {0};
@@ -714,7 +683,7 @@ void unlockEmergency(void) {
     return;
   }
   if (!canReady) {
-    Serial.println("CAN FAILS. UNLOCK EMERGENCY SEND SKIPPED");
+    Serial.println(F("CAN FAILS. UNLOCK EMERGENCY SEND SKIPPED"));
     emergencyStopLatched = true;
   } else {
     unsigned long canId = (0x03 << 8) | 0x00;
@@ -777,6 +746,8 @@ void setLEDColor(void) {
 //Setup
 /**************************************************************************************************/
 void setup() {
+  wdt_disable();
+  wdt_enable(WDTO_2S);
   Serial.begin(115200);
   pinMode(10, OUTPUT);
   digitalWrite(10, HIGH);
@@ -787,20 +758,20 @@ void setup() {
 
   //*****USB成功/失敗判定*****
   if (Usb.Init() == -1) {
-    Serial.println("USB host did not start.");
+    Serial.println(F("USB host did not start."));
     while (1);
   } else {
-    Serial.println("USB Host Ready.");
+    Serial.println(F("USB Host Ready."));
 
   }
 
   //*****CAN成功/失敗判定*****
   if (CAN0.begin(MCP_ANY, CAN_BUS_SPEED, MCP2515_CLOCK) == CAN_OK) {
-    Serial.println("CAN_Successful");
+    Serial.println(F("CAN_Successful"));
     CAN0.setMode(MCP_NORMAL);
     canReady = true;
   } else {
-    Serial.println("CAN_Failed");
+    Serial.println(F("CAN_Failed"));
     canReady = false;
   }
   sendINIT();
@@ -810,9 +781,9 @@ void setup() {
 
 /**************************************************************************************************/
 //loop
-//切断時のエッジ検出＋ESTOPフレーム送信（B-2）はwio実装まで不明なため未実装。
 /**************************************************************************************************/
 void loop() {
+  wdt_reset();
   Usb.Task();
   canRetry();
   ReSendINIT();
