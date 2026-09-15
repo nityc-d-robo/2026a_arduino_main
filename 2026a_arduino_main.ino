@@ -181,7 +181,7 @@ const int RPMLimitPerSec = 400;
 //*****正規化用の係数の絶対値*****
 const float coefValue = 0.7071f;
 
-//*****スティックの値の中心値*****
+//*****スティックの値の最大振れ幅*****
 const byte stickMaxValue = 127;
 
 //*****スティックのデッドゾーン*****

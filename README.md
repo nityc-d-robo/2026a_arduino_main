@@ -46,3 +46,6 @@ lastButtonsState = controller.buttons;
 ```
 * 2つ目のコントローラーの値を読む関数bucketButtonClicked()を追加<br>
 <font color="red">関数の中身は送る方針が決まったら変更する</font>
+
+## 9/15 変更点
+* コメントの微修正
