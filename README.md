@@ -49,3 +49,9 @@ lastButtonsState = controller.buttons;
 
 ## 9/15 変更点
 * コメントの微修正
+
+## 9/15 rebaseしたmasterでの変更点
+* ウォッチドッグなるものを追加，フリーズ時などに自動的に再起動するように変更
+* どこにも使用していないためbuttonName()を削除
+* F()マクロをSerial.printに追加
+* translateMaxRPMを170から150に，rotateMaxRPMを100から90に

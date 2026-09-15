@@ -894,7 +894,7 @@ void setup() {
   sendAllZero();
 
   //デバッグ用
-  Serial.print("sizeof(ControllerPacket) = ");
+  Serial.print(F("sizeof(ControllerPacket) = "));
   Serial.println(sizeof(ControllerPacket));
 
   lastLoopStartTime = millis();
