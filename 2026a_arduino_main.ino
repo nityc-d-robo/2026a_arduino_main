@@ -217,7 +217,6 @@ const float fastSpeedScale = 1.5f;
 
 //*****接続診断（切断）
 bool Pad1_wasConnected = false;
-bool Pad2_wasConnected = false;
 
 //*****切断した時点の時間*****
 unsigned long lastDisconnectTime = 0;
@@ -872,15 +871,6 @@ void setup() {
     Serial.println(F("Reset cause: None(正しく診断できていない)"));
   }
 
-  //*****USB成功/失敗判定*****
-  if (Usb.Init() == -1) {
-    Serial.println(F("USB host did not start."));
-    while (1);
-  } else {
-    Serial.println(F("USB Host Ready."));
-
-  }
-
   //*****CAN成功/失敗判定*****
   if (CAN0.begin(MCP_ANY, CAN_BUS_SPEED, MCP2515_CLOCK) == CAN_OK) {
     Serial.println(F("CAN_Successful"));
@@ -933,12 +923,9 @@ void loop() {
       if ((unsigned long)(millis() - lastDisconnectTime) >= needSHAREButtonTime) {
         emergencyStopLatched = true;
       }
-      clearButtons();
-      setLEDColor();
     }
     Pad1_wasConnected = isConnected;
   }
-  Pad2ConnectState();
 
 
   //*****接続されていないときはloop先頭に戻る*****
