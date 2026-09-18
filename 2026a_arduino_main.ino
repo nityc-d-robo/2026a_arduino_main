@@ -271,6 +271,9 @@ bool pulseOn[totalValveNum] = {false};
 bool pulseSent[totalValveNum] = {false};
 unsigned long pulseOffTime[totalValveNum] = {0};
 
+//*****各ビットに対応*****
+const byte bitIndex[18] = {13, 14, 12, 15, 255, 255, 255, 255, 16, 17, 22, 23, 18, 19, 20, 21, 24, 26};
+
 /**************************************************************************************************/
 //関数
 /**************************************************************************************************/
@@ -331,6 +334,30 @@ void recieveWioData(void) {
         if (result == wioBuffer[10]) {
           //wioBuffer の先頭10バイトを controller 構造体にコピーする
           memcpy(&controller, wioBuffer, sizeof(controller));
+          uint32_t rawValue = controller.buttons;
+          uint32_t converted = 0;
+          byte HATValue = (rawValue >> 9) & 0b111;
+
+          for (int i = 0; i < 18; i++) {
+            if (bitIndex[i] == 255) {
+              continue;
+            } else {
+              if ((rawValue >> bitIndex[i]) & 1) {
+                converted |= (unsigned long)1 << i;
+              }
+            }
+          }
+          if (HATValue == 0b00) {
+            converted |= (unsigned long)1 << 4;
+          } else if (HATValue == 0b01) {
+            converted |= (unsigned long)1 << 7;
+          } else if (HATValue == 0b10) {
+            converted |= (unsigned long)1 << 5;
+          } else if (HATValue == 0b11) {
+            converted |= (unsigned long)1 << 6;
+          }
+          controller.buttons = converted;
+          
           lastWioRecieveTime = millis();
         }
         recieveState = false;
