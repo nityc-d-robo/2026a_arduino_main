@@ -199,11 +199,8 @@ unsigned long lastDisconnectTime = 0;
 const unsigned long needSHAREButtonTime = 1000;
 
 
-
 unsigned long lastLoopStartTime = 0;
 unsigned long maxLoopDuration = 0;
-
-
 
 /**************************************************************************************************/
 //配列
@@ -751,6 +748,9 @@ void ReSendAllZero(void) {
 
 //*****コントローラーのLED変化*****
 void setLEDColor(void) {
+  if (!PS4.connected()) {
+    return;
+  }
   if (emergencyStopLatched) {
     PS4.setLed(Red);
   } else {
@@ -855,7 +855,7 @@ void loop() {
   if (Pad1_wasConnected != isConnected) {
     if (!isConnected) {
       lastDisconnectTime = millis();
-      ReSendAllZero();
+      sendAllZero();
       sendCANStop();
     } else {
       if ((unsigned long)(millis() - lastDisconnectTime) >= needSHAREButtonTime) {
