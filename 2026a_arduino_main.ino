@@ -1,6 +1,7 @@
 #include <SPI.h>
 #include <mcp_can.h>
 #include <avr/wdt.h>
+#include <Wire.h>
 
 //*****ボタンのビット番号*****
 const byte btnBit_CROSS     = 0;
@@ -227,17 +228,9 @@ const unsigned long needSHAREButtonTime = 1000;
 //*****wioタイムアウト*****
 const unsigned long wioLinkTimeout = 300;
 
-//*****開始バイト待ちか受信中か*****
-bool recieveState = false;
-
-//*****カウンタ*****
-byte byteCounta = 0;
-
 //最後に受け取った時間
-unsigned long lastWioRecieveTime = 0;
+unsigned long lastWioReceiveTime = 0;
 
-//*****バッファ*****
-byte wioBuffer[11];
 
 uint32_t lastButtonsState = 0;
 
@@ -252,6 +245,11 @@ const byte funcCode_Air = 0x01;
 const byte typeId_Air = 0b011;
 const byte nodeNum_Air = 1;
 
+//*****新しいデータが来たことのフラグ*****
+volatile bool newDataFlag  = false;
+
+//*****何バイト送ってきたか*****
+volatile byte lastReceivedCount = 0;
 
 /**************************************************************************************************/
 //配列
@@ -274,6 +272,13 @@ unsigned long pulseOffTime[totalValveNum] = {0};
 //*****各ビットに対応*****
 const byte bitIndex[18] = {13, 14, 12, 15, 255, 255, 255, 255, 16, 17, 22, 23, 18, 19, 20, 21, 24, 26};
 
+//*****I2Cで受け取った値を入れるバッファ*****
+volatile byte I2CBuffer[sizeof(ControllerPacket)] = {0};
+
+//*****I2CBufferをコピーするバッファ*****
+volatile byte temporaryBuffer[sizeof(ControllerPacket)] = {0};
+
+
 /**************************************************************************************************/
 //関数
 /**************************************************************************************************/
@@ -293,7 +298,7 @@ bool makeCanId(byte funcCode, byte typeId, byte nodeNum, byte deviceId, unsigned
 }
 //*****接続判定*****
 bool wioConnected(void) {
-  if ((unsigned long)(millis() - lastWioRecieveTime) < wioLinkTimeout) {
+  if ((unsigned long)(millis() - lastWioReceiveTime) < wioLinkTimeout) {
     return true;
   } else {
     return false;
@@ -311,60 +316,17 @@ bool wioButtonClicked(byte bit) {
   }
 }
 
-//*****受信関数*****
-void recieveWioData(void) {
-  while (wioSerial.available()) {
-    byte b = wioSerial.read();
-    if (!recieveState) {
-      if (b == 0xAA) {
-        byteCounta = 0;
-        recieveState = true;
-      } else {
-        continue;
-      }
-    } else {
-      wioBuffer[byteCounta] = b;
-      byteCounta++;
-      if (byteCounta == 11) {
-        //wioBuffer の先頭10バイトをXORし、計算結果を求める
-        byte result = 0;
-        for (int i = 0; i < 10; i++) {
-          result ^= wioBuffer[i];
-        }
-        if (result == wioBuffer[10]) {
-          //wioBuffer の先頭10バイトを controller 構造体にコピーする
-          memcpy(&controller, wioBuffer, sizeof(controller));
-          uint32_t rawValue = controller.buttons;
-          uint32_t converted = 0;
-          byte HATValue = (rawValue >> 9) & 0b111;
-
-          for (int i = 0; i < 18; i++) {
-            if (bitIndex[i] == 255) {
-              continue;
-            } else {
-              if ((rawValue >> bitIndex[i]) & 1) {
-                converted |= (unsigned long)1 << i;
-              }
-            }
-          }
-          if (HATValue == 0b00) {
-            converted |= (unsigned long)1 << 4;
-          } else if (HATValue == 0b01) {
-            converted |= (unsigned long)1 << 7;
-          } else if (HATValue == 0b10) {
-            converted |= (unsigned long)1 << 5;
-          } else if (HATValue == 0b11) {
-            converted |= (unsigned long)1 << 6;
-          }
-          controller.buttons = converted;
-          
-          lastWioRecieveTime = millis();
-        }
-        recieveState = false;
-        byteCounta = 0;
-      }
-    }
+//*****受け取ったデータをバッファにコピー*****
+void copyWioData(int len) {
+  lastReceivedCount = len;
+  byte lenSize = len;
+  if (lenSize > sizeof(controller)) {
+    lenSize = sizeof(controller);
   }
+  for (int i = 0; i < lenSize; i++) {
+    I2CBuffer[i] = Wire.read();
+  }
+  newDataFlag = true;
 }
 
 //*****canId共通関数*****
@@ -441,7 +403,7 @@ void printMcpError(byte eflg) {
   bool printed = false;
 
   if (eflg & MCP_EFLG_EWARN) {
-    Serial.println(F("エラー警告:TEC or RECが警告レベルに到達"));
+    Serial.println(F("エラー警告:TEC or RECが警告レベルに到達"));//送信/受信のエラーカウンタ
     printed = true;
   }
   if (eflg & MCP_EFLG_RXWAR) {
@@ -866,8 +828,12 @@ void setup() {
   MCUSR = 0;
   wdt_disable();
   wdt_enable(WDTO_2S);
+
   Serial.begin(115200);
-  wioSerial.begin(115200);
+  Wire.begin(0x12);
+  Wire.onReceive(copyWioData);
+
+  //*****明示的にピンを設定しておく*****
   pinMode(10, OUTPUT);
   digitalWrite(10, HIGH);
   pinMode(CAN_CS_PIN, OUTPUT);
@@ -936,11 +902,45 @@ void loop() {
   }
 
   wdt_reset();
-  recieveWioData();
   canRetry();
   ReSendINIT();
   pulseTimeObserve();
   sendPulseCan(false);
+  if (newDataFlag) {
+    noInterrupts();
+    memcpy((void*) temporaryBuffer, (const void*) I2CBuffer, sizeof(controller));
+    newDataFlag = false;
+    byte byteCounta = lastReceivedCount;
+    interrupts();
+    if (byteCounta == sizeof(ControllerPacket)) {
+      memcpy(&controller, (const void*) temporaryBuffer, sizeof(controller));
+      lastWioReceiveTime = millis();
+      uint32_t rawValue = controller.buttons;
+      uint32_t converted = 0;
+      byte HATValue = (rawValue >> 9) & 0b111;
+
+      for (int i = 0; i < 18; i++) {
+        if (bitIndex[i] == 255) {
+          continue;
+        } else {
+          if ((rawValue >> bitIndex[i]) & 1) {
+            converted |= (unsigned long)1 << i;
+          }
+        }
+      }
+      if (HATValue == 0b00) {
+        converted |= (unsigned long)1 << 4;
+      } else if (HATValue == 0b01) {
+        converted |= (unsigned long)1 << 7;
+      } else if (HATValue == 0b10) {
+        converted |= (unsigned long)1 << 5;
+      } else if (HATValue == 0b11) {
+        converted |= (unsigned long)1 << 6;
+      }
+      controller.buttons = converted;
+
+    }
+  }
 
   bool isConnected = wioConnected();
 
