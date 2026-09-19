@@ -64,3 +64,15 @@ lastButtonsState = controller.buttons;
 ## 9/18 変更点
 * UART完成，対応するようにコードを更新
 * ただし，基盤側の問題によりI2Cに！
+
+## 9/19 変更点 急遽I2Cに変更！
+* アドレスは0x12
+* Wireを導入
+* UART関連は削除（一部を除く）
+* 構造体は変わってないのでbitIndexなどはUARTのものを流用
+* 割り込みなのでreceiveWioData()を最小限に（copyWioDataに変更）
+* <font color="red">急ぎで書いたのでloopがごっちゃごちゃ　関数化は後日</font>
+***
+    AI曰く
+* 電圧が異なる？(3.3と5)
+* アドレスがHALライブラリではシフトされてる可能性があるので注意
