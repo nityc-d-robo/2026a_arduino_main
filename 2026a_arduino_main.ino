@@ -75,11 +75,11 @@ struct PulseButtonCommand {
 
 //*****エアシリンダー用構造体の初期化*****
 PulseButtonCommand pulseCommands[] {
-  {R2,      0x01, Bucket, pulseOnValue, pulseStopInterval}, 
-  {SQUARE,  0x01, LEFT_4X, pulseOnValue, pulseStopInterval}, 
-  {CIRCLE,  0x01, RIGHT_4X, pulseOnValue, pulseStopInterval}, 
-  {TRIANGLE,0x01, LEFT_2X, pulseOnValue, pulseStopInterval}, 
-  {CROSS,   0x01, RIGHT_2X, pulseOnValue, pulseStopInterval}  
+  {R2,      0x01, Bucket, pulseOnValue, pulseStopInterval},
+  {SQUARE,  0x01, LEFT_4X, pulseOnValue, pulseStopInterval},
+  {CIRCLE,  0x01, RIGHT_4X, pulseOnValue, pulseStopInterval},
+  {TRIANGLE, 0x01, LEFT_2X, pulseOnValue, pulseStopInterval},
+  {CROSS,   0x01, RIGHT_2X, pulseOnValue, pulseStopInterval}
 };
 
 /**************************************************************************************************/
@@ -239,11 +239,11 @@ unsigned long pulseOffTime[totalValveNum] = {0};
 //*****モーターとエアシリンダーのCanIdを作る*****
 bool makeCanId(byte funcCode, byte typeId, byte nodeNum, byte deviceId, unsigned long &canId) {
   if (typeId > 7) {
-      return false;
+    return false;
   } else if (nodeNum > 3) {
-      return false;
+    return false;
   } else if (deviceId > 7) {
-      return false;
+    return false;
   } else {
     canId = (funcCode << 8) | (typeId << 5) | (nodeNum << 3) | (deviceId);
     return true;
@@ -258,7 +258,7 @@ bool resolveCanId(byte targetNode, byte funcCode, unsigned long &canId) {
     byte typeId = motorNodes[targetNode].typeId;
     byte nodeNum = motorNodes[targetNode].nodeNum;
     byte deviceId = motorNodes[targetNode].deviceId;
-    
+
     return makeCanId(funcCode, typeId, nodeNum, deviceId, canId);
   }
 }
@@ -562,12 +562,17 @@ float getSpeedScale(void) {
   }
 }
 
-//*****オムニに0を送り続ける*****
-void stopOmniNow(void) {
+//*****オムニを0にする*****
+void omniZero(void) {
   for (int i = 0; i < omniCount; i++) {
     downScaleRPM[i] = 0;
     actualSendValues[i] = 0;
   }
+}
+
+//*****オムニに0を送り続ける*****
+void stopOmniNow(void) {
+  omniZero();
   sendSpeedCan();
 }
 
@@ -630,7 +635,7 @@ void sendPulseCan(bool needZero) {
         pulseSent[i] = pulseOn[i];
       }
     }
-  }  
+  }
 }
 
 //*****全エアシリンダーOFF*****
@@ -680,7 +685,7 @@ void emergencyStop(void) {
   if (psClicked && !emergencyStopLatched) {
     emergencyStopLatched = true;
     setLEDColor();
-    
+
     allPulseStop();
     stopOmniNow();
     sendAllZero();
@@ -707,8 +712,8 @@ void unlockEmergency(void) {
       emergencyStopLatched = true;
     } else {
       emergencyStopLatched = false;
-      clearButtons(); 
-      setLEDColor();   
+      clearButtons();
+      setLEDColor();
     }
   }
 }
@@ -785,9 +790,9 @@ void setup() {
   pinMode(CAN_CS_PIN, OUTPUT);
   digitalWrite(CAN_CS_PIN, HIGH);
   setLEDColor();
-  lastDisconnectTime = millis();
+  lastDisconnectTime = millis() - needSHAREButtonTime;
 
-//*****リセットが行われたときに原因をprint
+  //*****リセットが行われたときに原因をprint
   bool printed = false;
   if (resetCause & (1 << WDRF)) {
     Serial.println(F("Reset cause: WATCHDOG"));
@@ -850,7 +855,7 @@ void loop() {
     Serial.print(F("NEW MAX LOOP TIME:"));
     Serial.println(maxLoopDuration);
   }
-  
+
   wdt_reset();
   Usb.Task();
   canRetry();
@@ -880,6 +885,7 @@ void loop() {
 
   //*****接続されていないときはloop先頭に戻る*****
   if (!isConnected) {
+    omniZero();
     ReSendOmniStop();
     ReSendAllZero();
     pulseOn_OFF();
@@ -890,7 +896,7 @@ void loop() {
   unlockEmergency();
 
   if (emergencyStopLatched) {
-    ReSendSpeed();
+    ReSendOmniStop();
     return;
   }
 
