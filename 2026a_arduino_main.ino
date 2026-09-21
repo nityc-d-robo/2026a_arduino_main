@@ -12,9 +12,6 @@ PS4BT PS4_2(&Btd);
 //PS4は1台目，先に接続されたコントローラー
 //PS4_2は2台目，次に接続されたコントローラー
 
-//*****エアシリンダーON*****
-const bool pulseOnValue = 1;
-
 //*****エアシリンダーのバルブ番号(仮)*****
 const byte Bucket = 0;
 const byte LEFT_4X = 4;
@@ -22,7 +19,7 @@ const byte RIGHT_4X = 5;
 const byte LEFT_2X = 6;
 const byte RIGHT_2X = 7;
 
-unsigned int pulseStopInterval = 1000;
+const unsigned int pulseStopInterval = 1000;
 
 /**************************************************************************************************/
 //構造体定義・初期化
@@ -67,19 +64,17 @@ OmniWheel omni[] {
 //*****エアシリンダー用の構造体*****
 struct PulseButtonCommand {
   ButtonEnum button;
-  byte funcCode;
-  byte targetNode;
-  int pulseValue;
+  byte valveNum;
   unsigned int sendPulseTimeLength;
 };
 
 //*****エアシリンダー用構造体の初期化*****
 PulseButtonCommand pulseCommands[] {
-  {R2,      0x01, Bucket, pulseOnValue, pulseStopInterval},
-  {SQUARE,  0x01, LEFT_4X, pulseOnValue, pulseStopInterval},
-  {CIRCLE,  0x01, RIGHT_4X, pulseOnValue, pulseStopInterval},
-  {TRIANGLE, 0x01, LEFT_2X, pulseOnValue, pulseStopInterval},
-  {CROSS,   0x01, RIGHT_2X, pulseOnValue, pulseStopInterval}
+  {R2,        Bucket,   pulseStopInterval},
+  {SQUARE,    LEFT_4X,  pulseStopInterval},
+  {CIRCLE,    RIGHT_4X, pulseStopInterval},
+  {TRIANGLE,  LEFT_2X,  pulseStopInterval},
+  {CROSS,     RIGHT_2X, pulseStopInterval}
 };
 
 /**************************************************************************************************/
@@ -655,7 +650,7 @@ void pulseOn_OFF(void) {
 void checkPulseButtons(void) {
   for (int i = 0; i < pulseCommandsCount; i++) {
     if (PS4.getButtonClick(pulseCommands[i].button)) {
-      writeValveOn(pulseCommands[i].targetNode, pulseCommands[i].sendPulseTimeLength);
+      writeValveOn(pulseCommands[i].valveNum, pulseCommands[i].sendPulseTimeLength);
     }
   }
   if (PS4_2.connected() && PS4_2.getButtonClick(CIRCLE)) {

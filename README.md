@@ -92,3 +92,8 @@
 ## 9/22 変更点
 * オムニの値を0にする処理を関数化，非常停止時や切断時のstop処理の前に追加
 * setupのlastDisconnectTimeを```millis()```から```millis() - needSHAREButtonTime```に変更
+
+## 9/22 軽微な修正
+* ```pulseStopInterval```にconstをつけた
+* ```PulseCommandsCommand```からfuncCode,pulsevalueを削除
+* ```PulseCommandsCommand```のtargetNodeをvalveNumに変更
