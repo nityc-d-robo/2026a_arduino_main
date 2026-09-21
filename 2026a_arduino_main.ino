@@ -831,6 +831,8 @@ void setup() {
 
   Serial.begin(115200);
   Wire.begin(0x12);
+  digitalWrite(SDA, LOW);
+  digitalWrite(SCL, LOW);
   Wire.onReceive(copyWioData);
 
   //*****明示的にピンを設定しておく*****

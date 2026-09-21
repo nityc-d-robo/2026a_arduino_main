@@ -76,3 +76,10 @@ lastButtonsState = controller.buttons;
     AI曰く
 * 電圧が異なる？(3.3と5)
 * アドレスがHALライブラリではシフトされてる可能性があるので注意
+
+## 9/21 変更点
+```
+  digitalWrite(SDA, LOW);
+  digitalWrite(SCL, LOW);
+```
+の二行を追加
