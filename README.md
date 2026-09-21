@@ -59,3 +59,32 @@
 ## 9/18 変更点
 * 切断時に確実に０を送れるように一部のReSendAllZeroをsendAllZeroに変更
 * コントローラーが切断されるとsetLEDが何もしないようにした
+
+## 9/21 変更点（ソレノイド基板ができたので，各バルブに番号を振ってCANを送れるように変更）
+* バルブ番号は
+    * Bucket    : 0  ※ただしオムニと重複しているため，バケツ動かず
+    * 4X_LEFT   : 4
+    * 4X_RIGHT  : 5
+    * 2X_LEFT   : 6
+    * 2X_RIGHT  : 7
+* エアの状態管理をボタン単位からバルブ単位に変更し，以下の配列で管理
+    * pulseOn[]     :
+    * pulseSent[]   :
+    * pulseOffTime[]:
+* ボタン配置の変更
+    * Bucket    : R2, 2台目のCIRCLE
+    * 4X_LEFT   : SQUARE
+    * 4X_RIGHT  : CIRCLE
+    * 2X_LEFT   : TRIANGLE
+    * 2X_RIGHT  : CROSS
+* motorNodes[]からエアシリンダー系を削除
+* makeCanId()でCanId組み立てを共通化
+* sendAirFrame()でCANフレームを送る
+* writeValveOn()でpulaseOnをtrueに，pulseTimeObserve()でfalseにする
+* sendPulseCan()でエアシリンダーのCANを送る．緊急時(needZeroがtrue)は一律OFFになる
+* allPulseStop()で全シリンダーをOFFに
+* pulseOn_OFF()はpulseOnをすべてfalseにするだけ
+* emergencyStop()と切断時はallPulseStop()（全バルブにOFFを強制送信）
+* 切断中のループはpulseOn_OFF()のみ（CANには送らない．OFFの送信は毎ループ先頭のsendPulseCan(false)が担当）
+* loop()先頭にpulseTimeObserve()とsendPulseCan(false)を配置
+* setup()はpulseSentを全てtrueにしてからallPulseStop()を呼ぶ(!canReadyのときも再開時にOFFを送る)
