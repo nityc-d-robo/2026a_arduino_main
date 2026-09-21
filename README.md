@@ -2,33 +2,33 @@
 9/8からwio用のやつはブランチを切った
 
 ## 9/9 変更内容
-* wioからの受信ができるようにControllerPacket構造体を追加
+* wioからの受信ができるように```ControllerPacket```構造体を追加
 * ボタンのbit番号を冒頭に記載．なお，今後を見据えて全ボタン分を記述
-* PS4.Connectedの代わりとなるwioConnected()を追加
-* ボタンクリック判定用のwioButtonClicked()を追加
-* recieveWioData()を追加，データが正しければwioBufferをcontrollerにコピー
+* PS4.Connectedの代わりとなる```wioConnected()```を追加
+* ボタンクリック判定用の```wioButtonClicked()```を追加
+* ```recieveWioData()```を追加，データが正しければ```wioBuffer```を```controlle```rにコピー
 * スティック値の値域を0～255からint8_tの-127～127に変更
-* getButtonClickをwioButtonClicked(btnBit_LEFT)などに置き換え
-* PS4BT.hとusbhub.hのインクルードを削除，それに伴ってPS4系とUSB系を完全削除<br>
+* getButtonClickを```wioButtonClicked(btnBit_LEFT)```などに置き換え
+* ```<PS4BT.h>```と```<usbhub.h>```のインクルードを削除，それに伴ってPS4系とUSB系を完全削除<br>
 <font color="red">~~**開始バイトとチェックサムは大和さんとのすり合わせなし**~~</font> ←話し合い済
 
 ## 9/10 masterでの変更をrebase, 以下にmasterでの変更を記す
 * applySlewLimitのRPMLimitPerFlameが0未満にならないように，下回ると1にする処理を追加
-* printMcpError()やprintCanResultName()などをcanSendCheckerに追加し，どのようなエラーが出て"CAN FAIL"になっているかをprint
-* constでbool printOmniを追加し，不要になった時にfalseにするだけで消せるようにした
-* printOmniの表示方法をちょっと修正
-* sendSpeedCanとstartPulseのsendValueを(unsigned int)にキャスト（こうしないとどうやら不安定になるらしい）
+* printMcpError()やprintCanResultName()などを```canSendChecker()```に追加し，どのようなエラーが出て"CAN FAIL"になっているかをprint
+* constで```bool printOmni```を追加し，不要になった時にfalseにするだけで消せるようにしたserialprintの中身を
+* ```printOmni```の表示方法をちょっと修正
+* sendSpeedCanとstartPulseのsendValueを```(unsigned int)```にキャスト（こうしないとどうやら不安定になるらしい）
 
 ## 9/10 rebase追記
 * speedScaleを追加し，R1で低速，L1で高速になるようにした
 
 ## 9/11 masterからrebaseを実行，以下にmasterの変更点
 * 関数位置の調整（高速/低速用関数など）
-* ReSendAllZeroを(!PS4.connected)の中に追加し，コントローラの接続が切れたときに0を送り続けるようにした
+* ```ReSendAllZero```を(!PS4.connected)の中に追加し，コントローラの接続が切れたときに0を送り続けるようにした
 * sendINITをemergencyStopLatchedがtrueの時はreturnするようにした（非常停止時にINITしないように ※要検討）
 * コントローラー切断時needSHAREButtonTime以上経過すると，SHAREボタンを押さないと動かなくなる（非常停止継続）ようにした
-* sendCANStop()を追加し，emergencyStop()とloop内の「接続状態のエッジ検出」のif文の中での0x00送信を共通の関数にまとめた
-* unlockEmergency()のemergencyStopLatchedのtrue/falseの位置変更・修正
+* ```sendCANStop()```を追加し，emergencyStop()とloop内の「接続状態のエッジ検出」のif文の中での0x00送信を共通の関数にまとめた
+* unlockEmergency()の```emergencyStopLatched```のtrue/falseの位置変更・修正
 
 ## 9/11 追記
 * setup()にwioSerial.beginを追加（これないと動かん）
@@ -52,14 +52,14 @@ lastButtonsState = controller.buttons;
 
 ## 9/15 rebaseしたmasterでの変更点
 * ウォッチドッグなるものを追加，フリーズ時などに自動的に再起動するように変更
-* どこにも使用していないためbuttonName()を削除
+* どこにも使用していないため```buttonName()```を削除
 * F()マクロをSerial.printに追加
-* translateMaxRPMを170から150に，rotateMaxRPMを100から90に
+* ```translateMaxRPM```を170から150に，```rotateMaxRPM```を100から90に
 
 ## 9/15にもう一回rebaseしたやつのmasterでの変更点
 * loop()が1周するまでの最大時間を記録する処理をloopに追加
 * 何らかの原因ででリセットされてsetup()に戻った時，リセットされた理由をprintする処理を追加
-* 先輩との調整後，translateMaxRPMを150から170に，rotateMaxRPMを90から100に変更，とりあえず確定
+* 先輩との調整後，```translateMaxRPM```を150から170に，```rotateMaxRPM```を90から100に変更，とりあえず確定
 
 ## 9/18 変更点
 * UART完成，対応するようにコードを更新
@@ -70,7 +70,7 @@ lastButtonsState = controller.buttons;
 * Wireを導入
 * UART関連は削除（一部を除く）
 * 構造体は変わってないのでbitIndexなどはUARTのものを流用
-* 割り込みなのでreceiveWioData()を最小限に（copyWioDataに変更）
+* 割り込みなので```receiveWioData()```を最小限に（copyWioDataに変更）
 * <font color="red">急ぎで書いたのでloopがごっちゃごちゃ　関数化は後日</font>
 ***
     AI曰く
@@ -92,23 +92,23 @@ lastButtonsState = controller.buttons;
     * 2X_LEFT   : 6
     * 2X_RIGHT  : 7
 * エアの状態管理をボタン単位からバルブ単位に変更し，以下の配列で管理
-    * pulseOn[]     :
-    * pulseSent[]   :
-    * pulseOffTime[]:
+    * ```pulseOn[]```     :
+    * ```pulseSent[]```   :
+    * ```pulseOffTime[]```:
 * ボタン配置の変更
-    * Bucket    : R2, 2台目のCIRCLE
-    * 4X_LEFT   : SQUARE
-    * 4X_RIGHT  : CIRCLE
-    * 2X_LEFT   : TRIANGLE
-    * 2X_RIGHT  : CROSS
-* motorNodes[]からエアシリンダー系を削除
-* makeCanId()でCanId組み立てを共通化
-* sendAirFrame()でCANフレームを送る
-* writeValveOn()でpulaseOnをtrueに，pulseTimeObserve()でfalseにする
-* sendPulseCan()でエアシリンダーのCANを送る．緊急時(needZeroがtrue)は一律OFFになる
-* allPulseStop()で全シリンダーをOFFに
-* pulseOn_OFF()はpulseOnをすべてfalseにするだけ
-* emergencyStop()と切断時はallPulseStop()（全バルブにOFFを強制送信）
-* 切断中のループはpulseOn_OFF()のみ（CANには送らない．OFFの送信は毎ループ先頭のsendPulseCan(false)が担当）
-* loop()先頭にpulseTimeObserve()とsendPulseCan(false)を配置
-* setup()はpulseSentを全てtrueにしてからallPulseStop()を呼ぶ(!canReadyのときも再開時にOFFを送る)
+    * Bucket    : ```R2```, 2台目の```CIRCLE```
+    * 4X_LEFT   : ```SQUARE```
+    * 4X_RIGHT  : ```CIRCLE```
+    * 2X_LEFT   : ```TRIANGLE```
+    * 2X_RIGHT  : ```CROSS```
+* ```motorNodes[]```からエアシリンダー系を削除
+* ```makeCanId()```でCanId組み立てを共通化
+* ```sendAirFrame()```でCANフレームを送る
+* ```writeValveOn()```でpulaseOnをtrueに，```pulseTimeObserve()```でfalseにする
+* ```sendPulseCan()```でエアシリンダーのCANを送る．緊急時(needZeroがtrue)は一律OFFになる
+* ```allPulseStop()```で全シリンダーをOFFに
+* ```pulseOn_OFF()```はpulseOnをすべてfalseにするだけ
+* emergencyStop()と切断時は```allPulseStop()```（全バルブにOFFを強制送信）
+* 切断中のループは```pulseOn_OFF()```のみ（CANには送らない．OFFの送信は毎ループ先頭のsendPulseCan(false)が担当）
+* loop()先頭に```pulseTimeObserve()```と```sendPulseCan(false)```を配置
+* setup()はpulseSentを全てtrueにしてから```allPulseStop()```を呼ぶ(!canReadyのときも再開時にOFFを送る)
