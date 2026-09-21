@@ -15,6 +15,15 @@ PS4BT PS4_2(&Btd);
 //*****エアシリンダーON*****
 const bool pulseOnValue = 1;
 
+//*****エアシリンダーのバルブ番号(仮)*****
+const byte Bucket = 0;
+const byte LEFT_4X = 4;
+const byte RIGHT_4X = 5;
+const byte LEFT_2X = 6;
+const byte RIGHT_2X = 7;
+
+unsigned int pulseStopInterval = 1000;
+
 /**************************************************************************************************/
 //構造体定義・初期化
 /**************************************************************************************************/
@@ -36,11 +45,6 @@ MotorNode motorNodes[] = {
   {1, 3, 0, 0, 0b011, 0, 1},//FR
   {1, 3, 0, 0, 0b011, 0, 2},//RR
   {1, 3, 0, 0, 0b011, 0, 3},//RL
-  {0, 5, 0, 0, 0b011, 1, 0},//2X_R
-  {0, 5, 0, 0, 0b011, 1, 1},//2X_L
-  {0, 5, 0, 0, 0b011, 1, 2},//4X_R
-  {0, 5, 0, 0, 0b011, 1, 3},//4X_L
-  {0, 5, 0, 0, 0b011, 2, 0},//バケツ
 };
 
 //*****オムニの構造体*****
@@ -71,11 +75,11 @@ struct PulseButtonCommand {
 
 //*****エアシリンダー用構造体の初期化*****
 PulseButtonCommand pulseCommands[] {
-  {CIRCLE,    0x01, 6, pulseOnValue, 300}, //4X_R
-  {SQUARE,    0x01, 4, pulseOnValue, 300}, //2X_R
-  {RIGHT,     0x01, 5, pulseOnValue, 300}, //2X_L
-  {LEFT,      0x01, 7, pulseOnValue, 300}, //4X_L
-  {TRIANGLE,  0x01, 8, pulseOnValue, 300}  //バケツ
+  {R2,      0x01, Bucket, pulseOnValue, pulseStopInterval}, 
+  {SQUARE,  0x01, LEFT_4X, pulseOnValue, pulseStopInterval}, 
+  {CIRCLE,  0x01, RIGHT_4X, pulseOnValue, pulseStopInterval}, 
+  {TRIANGLE,0x01, LEFT_2X, pulseOnValue, pulseStopInterval}, 
+  {CROSS,   0x01, RIGHT_2X, pulseOnValue, pulseStopInterval}  
 };
 
 /**************************************************************************************************/
@@ -136,7 +140,7 @@ const unsigned long speedSendInterval = 40;
 unsigned long lastDebugPrintTime = 0;
 
 //*****RPM表示のインターバル*****
-const unsigned long debugPrintInterval = 300;
+const unsigned long debugPrintInterval = 1000;
 
 //***************************************************************************
 //*****並進最大RPM*****
@@ -202,6 +206,14 @@ const unsigned long needSHAREButtonTime = 1000;
 unsigned long lastLoopStartTime = 0;
 unsigned long maxLoopDuration = 0;
 
+const byte packetId = 1;
+const byte totalValveNum = 8;
+
+const byte funcCode_Air = 0x01;
+const byte typeId_Air = 0b011;
+const byte nodeNum_Air = 1;
+
+
 /**************************************************************************************************/
 //配列
 /**************************************************************************************************/
@@ -215,15 +227,28 @@ int downScaleRPM[omniCount];
 //******調整して実際に送る値*****
 int actualSendValues[omniCount];
 
-//*****パルス中かどうかの状態管理*****
-bool pulseCommandsStates[pulseCommandsCount] = {false};
-
-//*****パルスがいつ終わるかの予定時刻*****
-unsigned long pulseUntilMs[pulseCommandsCount] = {0};
+//*****エアシリンダーの状態管理
+bool pulseOn[totalValveNum] = {false};
+bool pulseSent[totalValveNum] = {false};
+unsigned long pulseOffTime[totalValveNum] = {0};
 
 /**************************************************************************************************/
 //関数
 /**************************************************************************************************/
+
+//*****モーターとエアシリンダーのCanIdを作る*****
+bool makeCanId(byte funcCode, byte typeId, byte nodeNum, byte deviceId, unsigned long &canId) {
+  if (typeId > 7) {
+      return false;
+  } else if (nodeNum > 3) {
+      return false;
+  } else if (deviceId > 7) {
+      return false;
+  } else {
+    canId = (funcCode << 8) | (typeId << 5) | (nodeNum << 3) | (deviceId);
+    return true;
+  }
+}
 
 //*****canId共通関数*****
 bool resolveCanId(byte targetNode, byte funcCode, unsigned long &canId) {
@@ -233,17 +258,8 @@ bool resolveCanId(byte targetNode, byte funcCode, unsigned long &canId) {
     byte typeId = motorNodes[targetNode].typeId;
     byte nodeNum = motorNodes[targetNode].nodeNum;
     byte deviceId = motorNodes[targetNode].deviceId;
-    //範囲外チェック
-    if (typeId > 7) {
-      return false;
-    } else if (nodeNum > 3) {
-      return false;
-    } else if (deviceId > 7) {
-      return false;
-    } else {
-      canId = (funcCode << 8) | (typeId << 5) | (nodeNum << 3) | (deviceId);
-      return true;
-    }
+    
+    return makeCanId(funcCode, typeId, nodeNum, deviceId, canId);
   }
 }
 
@@ -566,95 +582,85 @@ void ReSendOmniStop(void) {
   }
 }
 
+//*****エアシリンダーONを送る*****
+bool sendAirFrame(byte valveNum, bool AirState) {
+  if (!canReady) {
+    return false;
+  }
+  if (valveNum >= totalValveNum) {
+    return false;
+  }
+  unsigned long canId;
+  if (!makeCanId(funcCode_Air, typeId_Air, nodeNum_Air, valveNum, canId)) {
+    return false;
+  } else {
+    byte data[8] = {packetId, (byte)AirState, 0, 0, 0, 0, 0, 0};
+    return canSendChecker(canId, data);
+  }
+}
+
+//*****開始を書き込む*****
+void writeValveOn(byte valveNum, unsigned int pulseLength) {
+  if (valveNum >= totalValveNum) {
+    return;
+  } else {
+    pulseOn[valveNum] = true;
+    pulseOffTime[valveNum] = millis() + pulseLength;
+  }
+}
+
+//*****時間が来たらpulseOnをfalseに*****
+void pulseTimeObserve(void) {
+  for (int i = 0; i < totalValveNum; i++) {
+    if (pulseOn[i] && (long)(millis() - pulseOffTime[i]) >= 0) {
+      pulseOn[i] = false;
+    }
+  }
+}
+
+//*****pulse送信*****
+void sendPulseCan(bool needZero) {
+  for (int i = 0; i < totalValveNum; i++) {
+    if (needZero) {
+      if (sendAirFrame(i, false)) {
+        pulseSent[i] = false;
+      }
+    } else if (pulseOn[i] != pulseSent[i]) {
+      if (sendAirFrame(i, pulseOn[i])) {
+        pulseSent[i] = pulseOn[i];
+      }
+    }
+  }  
+}
+
+//*****全エアシリンダーOFF*****
+void allPulseStop(void) {
+  pulseOn_OFF();
+  sendPulseCan(true);
+}
+
+//*****pulseOnをfalseにするだけ*****
+void pulseOn_OFF(void) {
+  for (int i = 0; i < totalValveNum; i++) {
+    pulseOn[i] = false;
+  }
+}
+
 //*****エアシリンダーのボタンが押されたかチェックする関数*****
 void checkPulseButtons(void) {
-  bool TRIANGLE_Clicked = false;
-  if (PS4_2.connected() && PS4_2.getButtonClick(TRIANGLE)) {
-    TRIANGLE_Clicked = true;
-  }
-  bool SQUARE_Clicked = PS4.getButtonClick(SQUARE);
-  bool CIRCLE_Clicked = PS4.getButtonClick(CIRCLE);
-  bool RIGHT_Clicked = PS4.getButtonClick(RIGHT);
-  bool LEFT_Clicked = PS4.getButtonClick(LEFT);
-
   for (int i = 0; i < pulseCommandsCount; i++) {
-    bool pulseButtonClicked = false;
-
-    if (pulseCommands[i].button == TRIANGLE) {
-      pulseButtonClicked = TRIANGLE_Clicked;
-    } else if (pulseCommands[i].button == SQUARE) {
-      pulseButtonClicked = SQUARE_Clicked;
-    } else if (pulseCommands[i].button == CIRCLE) {
-      pulseButtonClicked = CIRCLE_Clicked;
-    } else if (pulseCommands[i].button == RIGHT) {
-      pulseButtonClicked = RIGHT_Clicked;
-    } else if (pulseCommands[i].button == LEFT) {
-      pulseButtonClicked = LEFT_Clicked;
+    if (PS4.getButtonClick(pulseCommands[i].button)) {
+      writeValveOn(pulseCommands[i].targetNode, pulseCommands[i].sendPulseTimeLength);
     }
-
-    if (pulseButtonClicked) {
-      startPulse(i);
-    }
+  }
+  if (PS4_2.connected() && PS4_2.getButtonClick(CIRCLE)) {
+    writeValveOn(Bucket, pulseStopInterval);
   }
 }
 
-//*****エアシリンダーのボタンが押されるとON値を送信し、成功したら終了予定時刻をセット*****
-void startPulse(byte index) {
-  if (!canReady) {
-    Serial.println(F("CAN FAILS. PULSE START SKIPPED"));
-    return;
-  }
-  byte targetNode = pulseCommands[index].targetNode;
-  byte funcCode = pulseCommands[index].funcCode;
-  unsigned long canId;
-  if (!resolveCanId(targetNode, funcCode, canId)) {
-    return;
-  }
-  int sendValue = pulseCommands[index].pulseValue;
-  byte data[8] = {1, (byte)(((unsigned int)sendValue >> 8) & 0xFF), (byte)(sendValue & 0xFF), 0, 0, 0, 0, 0};
-  if (canSendChecker(canId, data)) {
-    pulseCommandsStates[index] = true;
-    pulseUntilMs[index] = millis() + pulseCommands[index].sendPulseTimeLength;
-  }
-}
 
-//*****毎ループ呼ばれ、終了予定時刻を過ぎたパルスを自動的に止める*****
-void autoStopPulses(void) {
-  for (int i = 0; i < pulseCommandsCount; i++) {
-    if (!pulseCommandsStates[i]) {
-      continue;
-    }
-    if ((long)(millis() - pulseUntilMs[i]) >= 0) {
-      stopPulse(i);
-    }
-  }
-}
 
-//*****パルス終了：OFF(0)を送信。失敗時はactiveのままにして次ループで再送*****
-void stopPulse(byte index) {
-  if (!canReady) {
-    return;
-  }
-  byte targetNode = pulseCommands[index].targetNode;
-  byte funcCode = pulseCommands[index].funcCode;
-  unsigned long canId;
-  if (!resolveCanId(targetNode, funcCode, canId)) {
-    return;
-  }
-  byte data[8] = {1, 0, 0, 0, 0, 0, 0, 0};
-  if (canSendChecker(canId, data)) {
-    pulseCommandsStates[index] = false;
-  }
-}
 
-//*****全パルスを強制終了させる（非常停止）*****
-void setPulsesEndTime(void) {
-  for (int i = 0; i < pulseCommandsCount; i++) {
-    if (pulseCommandsStates[i]) {
-      pulseUntilMs[i] = millis();  // 終了予定時刻を「今」にして、autoStopPulses()に即座に処理させる
-    }
-  }
-}
 
 //*****非常停止共通関数*****
 void sendCANStop(void) {
@@ -675,8 +681,7 @@ void emergencyStop(void) {
     emergencyStopLatched = true;
     setLEDColor();
     
-    setPulsesEndTime();
-    autoStopPulses();
+    allPulseStop();
     stopOmniNow();
     sendAllZero();
 
@@ -711,11 +716,10 @@ void unlockEmergency(void) {
 //*****非常停止解除時に読み取っていた値を消費する*****
 void clearButtons(void) {
   for (int i = 0; i < pulseCommandsCount; i++) {
-    if (pulseCommands[i].button == TRIANGLE) {
-      PS4_2.getButtonClick(TRIANGLE);
-    } else {
-      PS4.getButtonClick(pulseCommands[i].button);
-    }
+    PS4.getButtonClick(pulseCommands[i].button);
+  }
+  if (PS4_2.connected()) {
+    PS4_2.getButtonClick(CIRCLE);
   }
 }
 
@@ -825,6 +829,10 @@ void setup() {
   }
   sendINIT();
   sendAllZero();
+  for (int i = 0; i < totalValveNum; i++) {
+    pulseSent[i] = true;
+  }
+  allPulseStop();
   lastLoopStartTime = millis();
 }
 
@@ -847,7 +855,8 @@ void loop() {
   Usb.Task();
   canRetry();
   ReSendINIT();
-  autoStopPulses();
+  pulseTimeObserve();
+  sendPulseCan(false);
 
   bool isConnected = PS4.connected();
 
@@ -857,6 +866,7 @@ void loop() {
       lastDisconnectTime = millis();
       sendAllZero();
       sendCANStop();
+      allPulseStop();
     } else {
       if ((unsigned long)(millis() - lastDisconnectTime) >= needSHAREButtonTime) {
         emergencyStopLatched = true;
@@ -872,8 +882,7 @@ void loop() {
   if (!isConnected) {
     ReSendOmniStop();
     ReSendAllZero();
-    setPulsesEndTime();
-    autoStopPulses();
+    pulseOn_OFF();
     return;
   }
 
