@@ -116,3 +116,9 @@ lastButtonsState = controller.buttons;
 ## 9/22 rebase後追記
 * オムニの値を0にする処理を関数化，非常停止時や切断時のstop処理の前に追加
 * setupのlastDisconnectTimeを```millis()```から```millis() - needSHAREButtonTime```に変更
+
+## 9/22 rebase追記2
+* ```pulseStopInterval```にconstをつけた
+* ```PulseCommandsCommand```からfuncCode,pulsevalueを削除
+* ```PulseCommandsCommand```のtargetNodeをvalveNumに変更
+* ```wioSerial```を削除

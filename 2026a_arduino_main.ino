@@ -222,8 +222,6 @@ unsigned long lastDisconnectTime = 0;
 
 //*****切断後SHAREを押さないと動作しなくなる時間*****
 const unsigned long needSHAREButtonTime = 1000;
-//*****wio*****
-#define wioSerial Serial1
 
 //*****wioタイムアウト*****
 const unsigned long wioLinkTimeout = 300;
@@ -231,9 +229,7 @@ const unsigned long wioLinkTimeout = 300;
 //最後に受け取った時間
 unsigned long lastWioReceiveTime = 0;
 
-
 uint32_t lastButtonsState = 0;
-
 
 unsigned long lastLoopStartTime = 0;
 unsigned long maxLoopDuration = 0;
