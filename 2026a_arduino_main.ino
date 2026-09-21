@@ -842,6 +842,7 @@ void setup() {
   digitalWrite(CAN_CS_PIN, HIGH);
 
   lastDisconnectTime = millis() - needSHAREButtonTime;
+  lastWioReceiveTime = millis() - wioLinkTimeout;
 
   //*****リセットが行われたときに原因をprint
   bool printed = false;
@@ -957,6 +958,7 @@ void loop() {
       if ((unsigned long)(millis() - lastDisconnectTime) >= needSHAREButtonTime) {
         emergencyStopLatched = true;
       }
+      lastButtonsState = controller.buttons;
     }
     Pad1_wasConnected = isConnected;
   }
