@@ -112,3 +112,7 @@ lastButtonsState = controller.buttons;
 * 切断中のループは```pulseOn_OFF()```のみ（CANには送らない．OFFの送信は毎ループ先頭のsendPulseCan(false)が担当）
 * loop()先頭に```pulseTimeObserve()```と```sendPulseCan(false)```を配置
 * setup()はpulseSentを全てtrueにしてから```allPulseStop()```を呼ぶ(!canReadyのときも再開時にOFFを送る)
+
+## 9/22 rebase後追記
+* オムニの値を0にする処理を関数化，非常停止時や切断時のstop処理の前に追加
+* setupのlastDisconnectTimeを```millis()```から```millis() - needSHAREButtonTime```に変更
