@@ -129,11 +129,22 @@ lastButtonsState = controller.buttons;
 * canRetry()内に```actualSendValues```を0にするループを追加
 * I2Cで送られてきたバイト数が規定でない場合printするようにした
 * wioの切断回数と累積時間を10秒ごとにprint
-* mega側がI2Cのマスター側になったのでそれに対応
+### mega側がI2Cのマスター側になったのでそれに対応
 * Wio側のアドレスは0x14
 * Wire.begin(0x14)から```Wire.begin()```に変更
 * ```Wire.onReceive(copyWioData)```を削除
 * ```copyWioData()```の書き換え
     * 引数をvoidに
     * ```Wire.requestFrom(0x14, sizeof(ControllerPacket))```でwioにデータを要求
-    * 受信したデータ長が構造体のサイズと等しかったら
+    * 受信したデータ長が構造体のサイズと等しいか判定し，同じなら読み取り，一致しなかったらログをprint
+* ```lastWioRequestTime``` と ```wioRequestInterval```を追加
+* 100ms(仮) ごとに```copyWioData()``` を呼び出す処理を追加
+* copyWioData() 側に移したため, if (newDataFlag) { ... } ブロックから、長さ不一致時の処理（else）を削除。
+* 水晶の周波数を8MHz->16MHzに変更（確定）
+* ```Wire.setWireTimeout(25000, true)```を追加，requestFromが止まったままにならないようにした
+* BucketのvalveNumを3番に決定
+* ```pulseCommands[]```からBucketを削除
+* バケツはR2で上下
+* ```checkBucket()```を追加，R2を押すたびに1/0を切り替え
+* ```pulseTimeObserve()```の中でバケツを自動OFFのタイマーから除外
+* rotateMaxRPMを140に変更
