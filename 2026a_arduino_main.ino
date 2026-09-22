@@ -13,7 +13,7 @@ PS4BT PS4_2(&Btd);
 //PS4_2は2台目，次に接続されたコントローラー
 
 //*****エアシリンダーのバルブ番号(仮)*****
-const byte Bucket = 0;
+const byte Bucket = 3;
 const byte LEFT_4X = 4;
 const byte RIGHT_4X = 5;
 const byte LEFT_2X = 6;
@@ -70,7 +70,6 @@ struct PulseButtonCommand {
 
 //*****エアシリンダー用構造体の初期化*****
 PulseButtonCommand pulseCommands[] {
-  {R2,        Bucket,   pulseStopInterval},
   {SQUARE,    LEFT_4X,  pulseStopInterval},
   {CIRCLE,    RIGHT_4X, pulseStopInterval},
   {TRIANGLE,  LEFT_2X,  pulseStopInterval},
@@ -96,7 +95,7 @@ MCP_CAN CAN0(CAN_CS_PIN);
 
 //*****CAN0.beginに渡す値*****
 const byte CAN_BUS_SPEED = CAN_1000KBPS;
-const byte MCP2515_CLOCK = MCP_8MHZ;
+const byte MCP2515_CLOCK = MCP_16MHZ;
 
 //*****INITのデータ*****
 byte initData[8] = {0};
@@ -142,7 +141,7 @@ const unsigned long debugPrintInterval = 1000;
 const int translateMaxRPM = 170;
 
 //*****回転最大RPM*****
-const int rotateMaxRPM = 100;
+const int rotateMaxRPM = 140;
 
 //*****最大RPM*****
 const int maxRPM = 200;
@@ -306,6 +305,9 @@ void canRetry(void) {
         CAN0.setMode(MCP_NORMAL);
         canFailCount = 0;
         lastINITSendTime = millis() - INITSendInterval;
+        for (int i = 0; i < omniCount; i++) {
+          actualSendValues[i] = 0;
+        }
       }
     }
   }
@@ -612,6 +614,9 @@ void writeValveOn(byte valveNum, unsigned int pulseLength) {
 //*****時間が来たらpulseOnをfalseに*****
 void pulseTimeObserve(void) {
   for (int i = 0; i < totalValveNum; i++) {
+    if (i == Bucket) {
+      continue;
+    }
     if (pulseOn[i] && (long)(millis() - pulseOffTime[i]) >= 0) {
       pulseOn[i] = false;
     }
@@ -653,14 +658,13 @@ void checkPulseButtons(void) {
       writeValveOn(pulseCommands[i].valveNum, pulseCommands[i].sendPulseTimeLength);
     }
   }
-  if (PS4_2.connected() && PS4_2.getButtonClick(CIRCLE)) {
-    writeValveOn(Bucket, pulseStopInterval);
-  }
 }
 
-
-
-
+void checkBucket(void) {
+  if (PS4.getButtonClick(R2)) {
+    pulseOn[Bucket] = !pulseOn[Bucket];
+  }
+}
 
 //*****非常停止共通関数*****
 void sendCANStop(void) {
@@ -718,9 +722,7 @@ void clearButtons(void) {
   for (int i = 0; i < pulseCommandsCount; i++) {
     PS4.getButtonClick(pulseCommands[i].button);
   }
-  if (PS4_2.connected()) {
-    PS4_2.getButtonClick(CIRCLE);
-  }
+  PS4.getButtonClick(R2);
 }
 
 //*****何らかの原因でMegaが再起動したとき0を送る*****
@@ -886,9 +888,8 @@ void loop() {
     pulseOn_OFF();
     return;
   }
-
-  emergencyStop();
   unlockEmergency();
+  emergencyStop();
 
   if (emergencyStopLatched) {
     ReSendOmniStop();
@@ -896,6 +897,7 @@ void loop() {
   }
 
   checkPulseButtons();
+  checkBucket();
 
   float vx = readStickRawValue(PS4.getAnalogHat(RightHatX), false);
   float vy = readStickRawValue(PS4.getAnalogHat(RightHatY), true);

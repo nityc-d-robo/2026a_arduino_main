@@ -97,3 +97,16 @@
 * ```pulseStopInterval```にconstをつけた
 * ```PulseCommandsCommand```からfuncCode,pulsevalueを削除
 * ```PulseCommandsCommand```のtargetNodeをvalveNumに変更
+
+## 9/22 さらに追記
+* loop()のif(emmergency~)の中にも```lastButtonsState = controller.buttons```を追加
+* loop()内の```emergencyStop()```と```unlockEmergency()```の順番を入れ替えた
+* canRetry()内に```actualSendValues```を0にするループを追加
+* BucketのvalveNumを3番に決定
+* ```pulseCommands[]```からBucketを削除
+* バケツはR2で上下
+* ```checkBucket()```を追加，R2を押すたびに1/0を切り替え
+* ```pulseTimeObserve()```の中でバケツを自動OFFのタイマーから除外
+* rotateMaxRPMを140に変更
+* clearButtons()のPS4_2.getButtonClick(CIRCLE)を削除，PS4.getButtonClick(R2)に変更
+* ```checkBucket()```を追加，R2を押すたびに1/0を切り替え
