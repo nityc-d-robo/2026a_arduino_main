@@ -122,3 +122,18 @@ lastButtonsState = controller.buttons;
 * ```PulseCommandsCommand```からfuncCode,pulsevalueを削除
 * ```PulseCommandsCommand```のtargetNodeをvalveNumに変更
 * ```wioSerial```を削除
+
+## 9/22 さらに追記
+* loop()のif(emmergency~)の中にも```lastButtonsState = controller.buttons```を追加
+* loop()内の```emergencyStop()```と```unlockEmergency()```の順番を入れ替えた
+* canRetry()内に```actualSendValues```を0にするループを追加
+* I2Cで送られてきたバイト数が規定でない場合printするようにした
+* wioの切断回数と累積時間を10秒ごとにprint
+* mega側がI2Cのマスター側になったのでそれに対応
+* Wio側のアドレスは0x14
+* Wire.begin(0x14)から```Wire.begin()```に変更
+* ```Wire.onReceive(copyWioData)```を削除
+* ```copyWioData()```の書き換え
+    * 引数をvoidに
+    * ```Wire.requestFrom(0x14, sizeof(ControllerPacket))```でwioにデータを要求
+    * 受信したデータ長が構造体のサイズと等しかったら

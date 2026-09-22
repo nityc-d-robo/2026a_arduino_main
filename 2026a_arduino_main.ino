@@ -81,10 +81,10 @@ struct PulseButtonCommand {
 
 //*****エアシリンダー用構造体の初期化*****
 PulseButtonCommand pulseCommands[] {
-  {btnBit_SQUARE,   LEFT_4X,  pulseStopInterval}, 
-  {btnBit_CIRCLE,   RIGHT_4X, pulseStopInterval}, 
-  {btnBit_TRIANGLE, LEFT_2X,  pulseStopInterval}, 
-  {btnBit_CROSS,    RIGHT_2X, pulseStopInterval}  
+  {btnBit_SQUARE,   LEFT_4X,  pulseStopInterval},
+  {btnBit_CIRCLE,   RIGHT_4X, pulseStopInterval},
+  {btnBit_TRIANGLE, LEFT_2X,  pulseStopInterval},
+  {btnBit_CROSS,    RIGHT_2X, pulseStopInterval}
 };
 
 //*****パケットを受け取る構造体*****
@@ -220,6 +220,12 @@ bool Pad1_wasConnected = false;
 //*****切断した時点の時間*****
 unsigned long lastDisconnectTime = 0;
 
+//*****デバッグのprint用（切断時）*****
+unsigned long disconnectCountUntil_10s = 0;
+unsigned long disconnectTimeUntil_10s = 0;
+unsigned long lastDisconnectReportTime = 0;
+const unsigned long disconnectReportInterval = 10000;
+
 //*****切断後SHAREを押さないと動作しなくなる時間*****
 const unsigned long needSHAREButtonTime = 1000;
 
@@ -228,6 +234,9 @@ const unsigned long wioLinkTimeout = 300;
 
 //最後に受け取った時間
 unsigned long lastWioReceiveTime = 0;
+
+unsigned long lastWioRequestTime = 0;
+const unsigned long wioRequestInterval = 100;
 
 uint32_t lastButtonsState = 0;
 
@@ -246,6 +255,9 @@ volatile bool newDataFlag  = false;
 
 //*****何バイト送ってきたか*****
 volatile byte lastReceivedCount = 0;
+
+unsigned long I2C_OKCount = 0;
+unsigned long I2C_NGCount = 0;
 
 /**************************************************************************************************/
 //配列
@@ -313,15 +325,27 @@ bool wioButtonClicked(byte bit) {
 }
 
 //*****受け取ったデータをバッファにコピー*****
-void copyWioData(int len) {
-  lastReceivedCount = len;
-  byte lenSize = len;
-  if (lenSize > sizeof(controller)) {
-    lenSize = sizeof(controller);
+void copyWioData(void) {
+  byte receiveBytes = Wire.requestFrom(0x14, sizeof(ControllerPacket));
+  if (receiveBytes == sizeof(ControllerPacket)) {
+    for (int i = 0; i < receiveBytes; i++) {
+      if (Wire.available()) {
+        I2CBuffer[i] = Wire.read();
+      }
+    }
+    I2C_OKCount++;
+  } else {
+    I2C_NGCount++;
+    Serial.print(F("Expected= "));
+    Serial.println(sizeof(ControllerPacket));
+    Serial.print(F("receiveBytes= "));
+    Serial.println(receiveBytes);
+    Serial.print(F("I2C_OK= "));
+    Serial.println(I2C_OKCount);
+    Serial.print(F("I2C_NG= "));
+    Serial.println(I2C_NGCount);
   }
-  for (int i = 0; i < lenSize; i++) {
-    I2CBuffer[i] = Wire.read();
-  }
+  lastReceivedCount = receiveBytes;
   newDataFlag = true;
 }
 
@@ -448,6 +472,19 @@ void printCanResultName(byte result) {
   }
   if (result == CAN_SENDMSGTIMEOUT) {
     Serial.println(F("送信バッファは確保，送信がタイムアウト"));
+  }
+}
+
+//*****10秒ごとに切断回数・時間をprint****
+void printDisconnect(void) {
+  if ((unsigned long)(millis() - lastDisconnectReportTime) >= disconnectReportInterval) {
+    lastDisconnectReportTime = millis();
+    Serial.print(F("disconnectCount= "));
+    Serial.println(disconnectCountUntil_10s);
+    Serial.print(F("disconnectTime= "));
+    Serial.println(disconnectTimeUntil_10s);
+    disconnectCountUntil_10s = 0;
+    disconnectTimeUntil_10s = 0;
   }
 }
 
@@ -730,6 +767,13 @@ void pulseOn_OFF(void) {
   }
 }
 
+//*****バケツ専用*****
+void checkBucket(void) {
+  if (wioButtonClicked(btnBit_R2)) {
+    pulseOn[Bucket] = !pulseOn[Bucket];
+  }
+}
+
 //*****エアシリンダーのボタンが押されたかチェックする関数*****
 void checkPulseButtons(void) {
   for (int i = 0; i < pulseCommandsCount; i++) {
@@ -756,7 +800,7 @@ void emergencyStop(void) {
   bool psClicked = wioButtonClicked(btnBit_PS);
   if (psClicked && !emergencyStopLatched) {
     emergencyStopLatched = true;
-    
+
     allPulseStop();
     stopOmniNow();
     sendAllZero();
@@ -826,10 +870,10 @@ void setup() {
   wdt_enable(WDTO_2S);
 
   Serial.begin(115200);
-  Wire.begin(0x12);
+  Wire.begin();
+  Wire.setWireTimeout(25000, true);
   digitalWrite(SDA, LOW);
   digitalWrite(SCL, LOW);
-  Wire.onReceive(copyWioData);
 
   //*****明示的にピンを設定しておく*****
   pinMode(10, OUTPUT);
@@ -901,8 +945,13 @@ void loop() {
   }
 
   wdt_reset();
+  if ((unsigned long)(millis() - lastWioRequestTime) >= wioRequestInterval) {
+    lastWioRequestTime = millis();
+    copyWioData();
+  }
   canRetry();
   ReSendINIT();
+  printDisconnect();
   pulseTimeObserve();
   sendPulseCan(false);
   if (newDataFlag) {
@@ -937,7 +986,6 @@ void loop() {
         converted |= (unsigned long)1 << 6;
       }
       controller.buttons = converted;
-
     }
   }
 
@@ -950,7 +998,10 @@ void loop() {
       sendAllZero();
       sendCANStop();
       allPulseStop();
+      disconnectCountUntil_10s++;
     } else {
+      unsigned long duration = (unsigned long)(millis() - lastDisconnectTime);
+      disconnectTimeUntil_10s += duration;
       if ((unsigned long)(millis() - lastDisconnectTime) >= needSHAREButtonTime) {
         emergencyStopLatched = true;
       }
@@ -973,6 +1024,7 @@ void loop() {
 
   if (emergencyStopLatched) {
     ReSendOmniStop();
+    lastButtonsState = controller.buttons;
     return;
   }
 
