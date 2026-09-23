@@ -250,14 +250,12 @@ const byte funcCode_Air = 0x01;
 const byte typeId_Air = 0b011;
 const byte nodeNum_Air = 1;
 
-//*****新しいデータが来たことのフラグ*****
-volatile bool newDataFlag  = false;
-
-//*****何バイト送ってきたか*****
-volatile byte lastReceivedCount = 0;
+byte I2CBuffer[sizeof(ControllerPacket)] = {0};
 
 unsigned long I2C_OKCount = 0;
 unsigned long I2C_NGCount = 0;
+
+uint32_t lastRawButtonsState = 0;
 
 /**************************************************************************************************/
 //配列
@@ -279,13 +277,6 @@ unsigned long pulseOffTime[totalValveNum] = {0};
 
 //*****各ビットに対応*****
 const byte bitIndex[18] = {13, 14, 12, 15, 255, 255, 255, 255, 16, 17, 22, 23, 18, 19, 20, 21, 24, 26};
-
-//*****I2Cで受け取った値を入れるバッファ*****
-volatile byte I2CBuffer[sizeof(ControllerPacket)] = {0};
-
-//*****I2CBufferをコピーするバッファ*****
-volatile byte temporaryBuffer[sizeof(ControllerPacket)] = {0};
-
 
 /**************************************************************************************************/
 //関数
@@ -325,7 +316,7 @@ bool wioButtonClicked(byte bit) {
 }
 
 //*****受け取ったデータをバッファにコピー*****
-void copyWioData(void) {
+bool copyWioData(void) {
   byte receiveBytes = Wire.requestFrom(0x14, sizeof(ControllerPacket));
   if (receiveBytes == sizeof(ControllerPacket)) {
     for (int i = 0; i < receiveBytes; i++) {
@@ -345,8 +336,7 @@ void copyWioData(void) {
     Serial.print(F("I2C_NG= "));
     Serial.println(I2C_NGCount);
   }
-  lastReceivedCount = receiveBytes;
-  newDataFlag = true;
+  return (receiveBytes == sizeof(ControllerPacket));
 }
 
 //*****canId共通関数*****
@@ -934,7 +924,6 @@ void setup() {
 //loop
 /**************************************************************************************************/
 void loop() {
-
   unsigned long now = millis();
   unsigned long loopDuration = (unsigned long)(now - lastLoopStartTime);
   lastLoopStartTime = now;
@@ -947,21 +936,8 @@ void loop() {
   wdt_reset();
   if ((unsigned long)(millis() - lastWioRequestTime) >= wioRequestInterval) {
     lastWioRequestTime = millis();
-    copyWioData();
-  }
-  canRetry();
-  ReSendINIT();
-  printDisconnect();
-  pulseTimeObserve();
-  sendPulseCan(false);
-  if (newDataFlag) {
-    noInterrupts();
-    memcpy((void*) temporaryBuffer, (const void*) I2CBuffer, sizeof(controller));
-    newDataFlag = false;
-    byte byteCounta = lastReceivedCount;
-    interrupts();
-    if (byteCounta == sizeof(ControllerPacket)) {
-      memcpy(&controller, (const void*) temporaryBuffer, sizeof(controller));
+    if (copyWioData()) {
+      memcpy((void*) &controller, (const void*) I2CBuffer, sizeof(controller));
       lastWioReceiveTime = millis();
       uint32_t rawValue = controller.buttons;
       uint32_t converted = 0;
@@ -986,8 +962,26 @@ void loop() {
         converted |= (unsigned long)1 << 6;
       }
       controller.buttons = converted;
+
+      if (!bitRead(lastRawButtonsState, btnBit_SQUARE)) {
+        bitClear(controller.buttons, btnBit_SQUARE);
+      } if (!bitRead(lastRawButtonsState, btnBit_CIRCLE)) {
+        bitClear(controller.buttons, btnBit_CIRCLE);
+      } if (!bitRead(lastRawButtonsState, btnBit_TRIANGLE)) {
+        bitClear(controller.buttons, btnBit_TRIANGLE);
+      } if (!bitRead(lastRawButtonsState, btnBit_CROSS)) {
+        bitClear(controller.buttons, btnBit_CROSS);
+      } if (!bitRead(lastRawButtonsState, btnBit_R2)) {
+        bitClear(controller.buttons, btnBit_R2);
+      }
+      lastRawButtonsState = converted;
     }
   }
+  canRetry();
+  ReSendINIT();
+  printDisconnect();
+  pulseTimeObserve();
+  sendPulseCan(false);
 
   bool isConnected = wioConnected();
 

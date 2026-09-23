@@ -148,3 +148,7 @@ lastButtonsState = controller.buttons;
 * ```checkBucket()```を追加，R2を押すたびに1/0を切り替え
 * ```pulseTimeObserve()```の中でバケツを自動OFFのタイマーから除外
 * rotateMaxRPMを140に変更
+
+## 9/23 変更点
+* megaがI2Cのマスターになったことによって不要になったものを削除（noInterrupts()とかvolatileとか）
+* loop()の中でエアシリンダーのボタンのみ「前回と今回の値どちらも1なら発射」という仕様にした  ※若干のラグが出る可能性あり
