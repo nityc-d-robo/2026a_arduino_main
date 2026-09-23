@@ -2,6 +2,7 @@
 #include <mcp_can.h>
 #include <avr/wdt.h>
 #include <Wire.h>
+#include <EEPROM.h>
 
 //*****ボタンのビット番号*****
 const byte btnBit_CROSS     = 0;
@@ -102,6 +103,15 @@ struct __attribute__((packed)) ControllerPacket {
 
 //*****初期化*****
 ControllerPacket controller = {0, 0, 0, 0, 0, 0, 0};
+
+//*****エアシリンダーの一回分の記録*****
+struct __attribute__((packed)) AirEventLog {
+  uint32_t timestamp;   //millis()の値
+  byte valveNum;        //弁の番号
+  byte state;           //1 or 0
+  uint32_t buttonsState;//controller.buttons
+  uint32_t rawButtons;  //生の値
+};
 
 /**************************************************************************************************/
 //変数定義・初期化
@@ -230,7 +240,7 @@ const unsigned long disconnectReportInterval = 10000;
 const unsigned long needSHAREButtonTime = 1000;
 
 //*****wioタイムアウト*****
-const unsigned long wioLinkTimeout = 300;
+const unsigned long wioLinkTimeout = 400;
 
 //最後に受け取った時間
 unsigned long lastWioReceiveTime = 0;
@@ -256,6 +266,12 @@ unsigned long I2C_OKCount = 0;
 unsigned long I2C_NGCount = 0;
 
 uint32_t lastRawButtonsState = 0;
+
+//*****デバッグ記録用*****
+const int eepromLogCount = 292;                  // 保存できる件数
+const int eepromRecordSize = sizeof(AirEventLog); // 1件のバイト数（14になるはず）
+const int eepromDataStart = 2;                    // ログ領域の開始番地（先頭2バイトは書き込み位置の記録用）
+int eepromWriteIndex = 0;  // 次に書き込む件数（0〜291を循環）
 
 /**************************************************************************************************/
 //配列
@@ -712,6 +728,7 @@ void writeValveOn(byte valveNum, unsigned int pulseLength) {
   if (valveNum >= totalValveNum) {
     return;
   } else {
+    logAirEvent(valveNum, true);
     pulseOn[valveNum] = true;
     pulseOffTime[valveNum] = millis() + pulseLength;
   }
@@ -761,6 +778,7 @@ void pulseOn_OFF(void) {
 void checkBucket(void) {
   if (wioButtonClicked(btnBit_R2)) {
     pulseOn[Bucket] = !pulseOn[Bucket];
+    logAirEvent(Bucket, pulseOn[Bucket]);
   }
 }
 
@@ -850,6 +868,25 @@ void ReSendAllZero(void) {
 }
 
 
+//*****エアシリンダーのログを書き込む*****
+void logAirEvent(byte valveNum, bool state) {
+  AirEventLog log;
+  log.timestamp = millis();
+  log.valveNum = valveNum;
+  log.state = state ? 1 : 0;
+  log.buttonsState = controller.buttons;
+  log.rawButtons = lastRawButtonsState;
+
+  int address = eepromDataStart + eepromWriteIndex * eepromRecordSize;
+  EEPROM.put(address, log);
+
+  eepromWriteIndex++;
+  if (eepromWriteIndex >= eepromLogCount) {
+    eepromWriteIndex = 0;
+  }
+  EEPROM.put(0, eepromWriteIndex);
+}
+
 /**************************************************************************************************/
 //Setup
 /**************************************************************************************************/
@@ -870,6 +907,12 @@ void setup() {
   digitalWrite(10, HIGH);
   pinMode(CAN_CS_PIN, OUTPUT);
   digitalWrite(CAN_CS_PIN, HIGH);
+
+  //デバッグ記録用初期化
+  EEPROM.get(0, eepromWriteIndex);
+  if (eepromWriteIndex < 0 || eepromWriteIndex >= eepromLogCount) {
+    eepromWriteIndex = 0;
+  }
 
   lastDisconnectTime = millis() - needSHAREButtonTime;
   lastWioReceiveTime = millis() - wioLinkTimeout;

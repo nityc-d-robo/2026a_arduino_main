@@ -152,3 +152,7 @@ lastButtonsState = controller.buttons;
 ## 9/23 変更点
 * megaがI2Cのマスターになったことによって不要になったものを削除（noInterrupts()とかvolatileとか）
 * loop()の中でエアシリンダーのボタンのみ「前回と今回の値どちらも1なら発射」という仕様にした  ※若干のラグが出る可能性あり
+
+## 9/23追記
+* wioLinkTimeoutを300->400に変更
+* EEPROMにエアーの発射ログを記録する処理を追加
