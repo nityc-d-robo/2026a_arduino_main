@@ -246,7 +246,7 @@ const unsigned long wioLinkTimeout = 400;
 unsigned long lastWioReceiveTime = 0;
 
 unsigned long lastWioRequestTime = 0;
-const unsigned long wioRequestInterval = 100;
+const unsigned long wioRequestInterval = 33;
 
 uint32_t lastButtonsState = 0;
 
@@ -260,10 +260,13 @@ const byte funcCode_Air = 0x01;
 const byte typeId_Air = 0b011;
 const byte nodeNum_Air = 1;
 
-byte I2CBuffer[sizeof(ControllerPacket)] = {0};
+const uint8_t wioAddress = 0x14;
+const byte receiveBufferSize = 11;
+byte I2CBuffer[receiveBufferSize] = {0};
 
 unsigned long I2C_OKCount = 0;
 unsigned long I2C_NGCount = 0;
+unsigned long I2C_CrcErrorCount = 0;
 
 uint32_t lastRawButtonsState = 0;
 
@@ -272,6 +275,8 @@ const int eepromLogCount = 292;                  // 保存できる件数
 const int eepromRecordSize = sizeof(AirEventLog); // 1件のバイト数（14になるはず）
 const int eepromDataStart = 2;                    // ログ領域の開始番地（先頭2バイトは書き込み位置の記録用）
 int eepromWriteIndex = 0;  // 次に書き込む件数（0〜291を循環）
+
+bool firstConnect = false;
 
 /**************************************************************************************************/
 //配列
@@ -331,28 +336,53 @@ bool wioButtonClicked(byte bit) {
   }
 }
 
-//*****受け取ったデータをバッファにコピー*****
-bool copyWioData(void) {
-  byte receiveBytes = Wire.requestFrom(0x14, sizeof(ControllerPacket));
-  if (receiveBytes == sizeof(ControllerPacket)) {
-    for (int i = 0; i < receiveBytes; i++) {
-      if (Wire.available()) {
-        I2CBuffer[i] = Wire.read();
+//*****チェックサム関数*****
+uint8_t calcCrc(const uint8_t data[10]) {
+  uint8_t crc = 0xFF;
+  for (int i = 0; i < 10; i++) {
+    crc ^= data[i];
+    for (uint8_t bit = 8; bit > 0; --bit) {
+      if (crc & 0x80) {
+        crc = (crc << 1) ^ 0x31u;
+      } else {
+        crc = (crc << 1);
       }
     }
-    I2C_OKCount++;
-  } else {
+  }
+  return crc;
+}
+
+//*****受け取ったデータをバッファにコピー*****
+bool copyWioData(void) {
+  byte receiveBytes = Wire.requestFrom(wioAddress, receiveBufferSize);
+  if (receiveBytes != receiveBufferSize) {
     I2C_NGCount++;
     Serial.print(F("Expected= "));
-    Serial.println(sizeof(ControllerPacket));
+    Serial.println(receiveBufferSize);
     Serial.print(F("receiveBytes= "));
     Serial.println(receiveBytes);
     Serial.print(F("I2C_OK= "));
     Serial.println(I2C_OKCount);
     Serial.print(F("I2C_NG= "));
     Serial.println(I2C_NGCount);
+    return false;
+  } else {
+    for (int i = 0; i < receiveBytes; i++) {
+      if (Wire.available()) {
+        I2CBuffer[i] = Wire.read();
+      }
+    }
+    byte calculated = calcCrc(I2CBuffer);
+    if (calculated == I2CBuffer[10]) {
+      I2C_OKCount++;
+      return true;
+    } else {
+      I2C_CrcErrorCount++;
+      Serial.print("crcErrorCount= ");
+      Serial.println(I2C_CrcErrorCount);
+      return false;
+    }
   }
-  return (receiveBytes == sizeof(ControllerPacket));
 }
 
 //*****canId共通関数*****
@@ -1038,9 +1068,13 @@ void loop() {
       disconnectCountUntil_10s++;
     } else {
       unsigned long duration = (unsigned long)(millis() - lastDisconnectTime);
-      disconnectTimeUntil_10s += duration;
-      if ((unsigned long)(millis() - lastDisconnectTime) >= needSHAREButtonTime) {
-        emergencyStopLatched = true;
+      if (!firstConnect) {
+        firstConnect = true;
+      } else {
+        disconnectTimeUntil_10s += duration;
+        if (duration >= needSHAREButtonTime) {
+          emergencyStopLatched = true;
+        }
       }
       lastButtonsState = controller.buttons;
     }

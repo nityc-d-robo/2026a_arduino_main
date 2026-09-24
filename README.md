@@ -6,7 +6,7 @@
 * ボタンのbit番号を冒頭に記載．なお，今後を見据えて全ボタン分を記述
 * PS4.Connectedの代わりとなる```wioConnected()```を追加
 * ボタンクリック判定用の```wioButtonClicked()```を追加
-* ```recieveWioData()```を追加，データが正しければ```wioBuffer```を```controlle```rにコピー
+* ```recieveWioData()```を追加，データが正しければ```wioBuffer```を```controller```にコピー
 * スティック値の値域を0～255からint8_tの-127～127に変更
 * getButtonClickを```wioButtonClicked(btnBit_LEFT)```などに置き換え
 * ```<PS4BT.h>```と```<usbhub.h>```のインクルードを削除，それに伴ってPS4系とUSB系を完全削除<br>
@@ -156,3 +156,10 @@ lastButtonsState = controller.buttons;
 ## 9/23追記
 * wioLinkTimeoutを300->400に変更
 * EEPROMにエアーの発射ログを記録する処理を追加
+
+## 9/24 変更点
+* requestIntervalを100 -> 33(およそ30Hz)に変更
+* 初回起動時のSHARE押下を削除   <font color="red">※wio切断時の復帰もなくすかは要相談</font>
+* チェックサム導入(```calcCrc()```導入,```copyWioData()```の変更)
+* wioのI2Cのアドレスをconstで宣言
+* I2CBufferのサイズをsizeof()ではなく受信するはずのバイト数（receiveBufferSize）に変更
