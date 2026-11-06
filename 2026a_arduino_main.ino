@@ -2,6 +2,7 @@
 #include <mcp_can.h>
 #include <avr/wdt.h>
 #include <Wire.h>
+#include <string.h>
 #include <EEPROM.h>
 
 //*****ボタンのビット番号*****
@@ -25,13 +26,15 @@ const byte btnBit_PS        = 16;
 const byte btnBit_MUTE      = 17;
 
 //*****エアシリンダーのバルブ番号(仮)*****
-const byte Bucket = 3;
-const byte LEFT_4X = 4;
-const byte RIGHT_4X = 5;
-const byte LEFT_2X = 6;
-const byte RIGHT_2X = 7;
+const byte Bucket = 6;
+const byte LEFT_4X = 3;
+const byte RIGHT_4X = 2;
+const byte LEFT_2X = 0;
+const byte RIGHT_2X = 1;
+const byte L2Valve = 7;
+const byte sequenceValve3 = 5;
 
-const unsigned int pulseStopInterval = 1000;
+const unsigned int pulseStopInterval = 500;
 
 /**************************************************************************************************/
 //構造体定義・初期化
@@ -82,10 +85,7 @@ struct PulseButtonCommand {
 
 //*****エアシリンダー用構造体の初期化*****
 PulseButtonCommand pulseCommands[] {
-  {btnBit_SQUARE,   LEFT_4X,  pulseStopInterval},
-  {btnBit_CIRCLE,   RIGHT_4X, pulseStopInterval},
-  {btnBit_TRIANGLE, LEFT_2X,  pulseStopInterval},
-  {btnBit_CROSS,    RIGHT_2X, pulseStopInterval}
+  {btnBit_RIGHT, RIGHT_4X, pulseStopInterval}
 };
 
 //*****パケットを受け取る構造体*****
@@ -278,6 +278,28 @@ int eepromWriteIndex = 0;  // 次に書き込む件数（0〜291を循環）
 
 bool firstConnect = false;
 
+const unsigned long regulatorCanId = 0x003;
+const byte regulatorCommand = 0x04;
+const uint16_t maxRegulatorPressure = 72; //上限0.72Mpa
+uint16_t regulatorPressure = 60; //0.01MPa単位の整数
+bool regulatorPressurePending = true;
+
+const uint16_t regulatorPressureStep = 1;
+const byte pressureModeCross = 0;
+const byte pressureModeCircle = 1;
+const byte pressureModeTriangle = 2;
+const byte pressureModeSquare = 3;
+byte selectedPressureMode = pressureModeCross;
+uint16_t crossValve0Pressure = 43;
+uint16_t crossValve1Pressure = 37;
+uint16_t circleValve0Pressure = 60;
+uint16_t circleValve1Pressure = 60;
+uint16_t triangleValve0Pressure = 44;
+uint16_t triangleValve1Pressure = 37;
+uint16_t squareValve0Pressure = 26;
+uint16_t squareValve1Pressure = 24;
+
+
 /**************************************************************************************************/
 //配列
 /**************************************************************************************************/
@@ -444,6 +466,7 @@ void canRetry(void) {
       if (CAN0.begin(MCP_ANY, CAN_BUS_SPEED, MCP2515_CLOCK) == CAN_OK) {
         canReady = true;
         CAN0.setMode(MCP_NORMAL);
+        regulatorPressurePending = true;
         canFailCount = 0;
         lastINITSendTime = millis() - INITSendInterval;
         for (int i = 0; i < omniCount; i++) {
@@ -700,8 +723,18 @@ void printOmniValue(void) {
 
 //*****高速/低速/通常を返す関数*****
 float getSpeedScale(void) {
-  bool slow = (controller.buttons >> btnBit_R1) & 1;
-  bool fast = (controller.buttons >> btnBit_L1) & 1;
+  bool R1 = ((controller.buttons >> btnBit_R1) & 1);
+  bool L1 = ((controller.buttons >> btnBit_L1) & 1);
+  bool UP = ((controller.buttons >> btnBit_UP) & 1);
+  bool DOWN = ((controller.buttons >> btnBit_DOWN) & 1);
+  bool adjustPressure = false;
+  if ((R1 || L1) && (UP || DOWN)) {
+    adjustPressure = true;
+  }
+  bool slow = R1 && !adjustPressure;
+  bool fast = L1 && !adjustPressure;
+
+
   if (slow == fast) {
     return 1.0f;
   } else if (slow) {
@@ -818,6 +851,108 @@ void checkPulseButtons(void) {
     if (wioButtonClicked(pulseCommands[i].button)) {
       writeValveOn(pulseCommands[i].valveNum, pulseCommands[i].sendPulseTimeLength);
     }
+  }
+}
+
+//*****圧力調整*****
+void checkRegulatorPressureButtons(void) {
+  bool L1Pressed = (controller.buttons >> btnBit_L1) & 1;
+  bool R1Pressed = (controller.buttons >> btnBit_R1) & 1;
+  uint16_t *p = NULL;
+
+  if (L1Pressed == R1Pressed) {
+    return;
+  }
+
+  if (L1Pressed) {
+    if (selectedPressureMode == 0) {
+      p = &crossValve0Pressure;
+    } else if (selectedPressureMode == 1) {
+      p = &circleValve0Pressure;
+    } else if (selectedPressureMode == 2) {
+      p = &triangleValve0Pressure;
+    } else if (selectedPressureMode == 3) {
+      p = &squareValve0Pressure;
+    }
+  }
+  if (R1Pressed) {
+    if (selectedPressureMode == 0) {
+      p = &crossValve1Pressure;
+    } else if (selectedPressureMode == 1) {
+      p = &circleValve1Pressure;
+    } else if (selectedPressureMode == 2) {
+      p = &triangleValve1Pressure;
+    } else if (selectedPressureMode == 3) {
+      p = &squareValve1Pressure;
+    }
+  }
+
+  if (p == NULL) {
+    return;
+  }
+
+  if (wioButtonClicked(btnBit_UP)) {
+    if (maxRegulatorPressure > *p) {
+      *p += regulatorPressureStep;
+      setRegulatorPressure(*p);
+    }
+  }
+  if (wioButtonClicked(btnBit_DOWN)) {
+    if (regulatorPressureStep <= *p) {
+      *p -= regulatorPressureStep;
+      setRegulatorPressure(*p);
+    }
+  }
+}
+
+//*****STARTでモードを変更*****
+void checkSTARTButton(void) {
+  if (!wioButtonClicked(btnBit_START)) {
+    return;
+  }
+  selectedPressureMode = (selectedPressureMode + 1) % 4; //余りで番号を判別
+
+  if (selectedPressureMode == 0) {
+    Serial.println("PressureMode= CROSS");
+  } else if (selectedPressureMode == 1) {
+    Serial.println("PressureMode= CIRCLE");
+  } else if (selectedPressureMode == 2) {
+    Serial.println("PressureMode= TRIANGLE");
+  } else if (selectedPressureMode == 3) {
+    Serial.println("PressureMode= SQUARE");
+  }
+}
+
+//*****電空レギュレータの値を決定（丸めなど）*****
+void setRegulatorPressure(uint16_t pressure) {
+  if (pressure > maxRegulatorPressure) {
+    pressure = maxRegulatorPressure;
+  }
+  regulatorPressure = pressure;
+  regulatorPressurePending = true;
+  Serial.print(F("CHANGED VALUE = "));
+  Serial.print(regulatorPressure);
+  Serial.println(F("(*0.01MPa)"));
+}
+
+//*****電空レギュレータへの命令を送信*****
+bool sendRegulatorPressure(void) {
+  if (!canReady) {
+    return false;
+  }
+  if (regulatorPressure > maxRegulatorPressure) {
+    regulatorPressure = maxRegulatorPressure;
+  }
+  float converted = regulatorPressure / 100.0f;
+  uint8_t divided[4];
+  memcpy(divided, &converted, sizeof(float));
+  byte data[8] = {0x04, divided[3], divided[2], divided[1], divided[0], 0, 0, 0};
+
+  if (!canSendChecker(regulatorCanId, data)) {
+    return false;
+  } else {
+    regulatorPressurePending = false;
+    return true;
   }
 }
 
@@ -1051,6 +1186,9 @@ void loop() {
     }
   }
   canRetry();
+  if (regulatorPressurePending) {
+    sendRegulatorPressure();
+  }
   ReSendINIT();
   printDisconnect();
   pulseTimeObserve();
@@ -1099,6 +1237,8 @@ void loop() {
     return;
   }
 
+  checkRegulatorPressureButtons();
+  checkSTARTButton();
   checkPulseButtons();
   checkBucket();
 
