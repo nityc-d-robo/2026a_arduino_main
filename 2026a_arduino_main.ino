@@ -298,6 +298,16 @@ uint16_t squareValve1Pressure = 24;
 bool L2ValveReturnReservation = false;
 unsigned long L2ValveReturnTime = 0; 
 
+//**********
+byte sequenceStep = 0;
+byte sequenceControlButton = 255;
+bool sequenceValve1PressurePending = false;
+uint16_t sequenceValve1PendingPressure = 0; //0.01MPa単位
+bool sequenceValve4Pending = false;
+unsigned long sequenceValve4StartTime = 0;
+bool sequenceBackendReady = false;
+
+
 
 //*****デバッグ記録用（AI生成）*****
 const int eepromLogCount = 292;                  // 保存できる件数
@@ -1061,6 +1071,12 @@ void emergencyStop(void) {
   if (psClicked && !emergencyStopLatched) {
     emergencyStopLatched = true;
 
+    sequenceValve4Pending = false;
+    sequenceValve1PressurePending = false;
+    sequenceValve1PendingPressure = 0;
+    sequenceStep = 0;
+    sequenceControlButton = 255;
+
     allPulseStop();
     stopOmniNow();
     sendAllZero();
@@ -1295,6 +1311,13 @@ void loop() {
       sendAllZero();
       sendCANStop();
       allPulseStop();
+      
+      sequenceValve4Pending = false;
+      sequenceValve1PressurePending = false;
+      sequenceValve1PendingPressure = 0;
+      sequenceStep = 0;
+      sequenceControlButton = 255;
+      
       disconnectCountUntil_10s++;
     } else {
       unsigned long duration = (unsigned long)(millis() - lastDisconnectTime);
