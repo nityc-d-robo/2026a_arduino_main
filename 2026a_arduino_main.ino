@@ -1,4 +1,3 @@
-#include <EEPROM.h>
 #include <SPI.h>
 #include <Wire.h>
 #include <avr/wdt.h>
@@ -47,15 +46,6 @@ struct __attribute__((packed)) ControllerPacket {
   uint8_t rightTrigger;
 
   uint32_t buttons;
-};
-
-//*****エアシリンダーの一回分の記録*****
-struct __attribute__((packed)) AirEventLog {
-  uint32_t timestamp;    // millis()の値
-  byte valveNum;         // 弁の番号
-  byte state;            // 1 or 0
-  uint32_t buttonsState; // controller.buttons
-  uint32_t rawButtons;   // 生の値
 };
 
 /**************************************************************************************************/
@@ -208,7 +198,7 @@ const byte stickMaxValue = 127;
 //*****スティックのデッドゾーン*****
 const byte stickDeadZone = 18;
 
-//*****モーター指導用*****
+//*****モーター指令用(負の値が通常の方向，正にすると逆転する（Homing中）)*****
 const int sequenceMotor_RPM = -80;
 
 //*****回転数を送信するインターバル*****
@@ -311,40 +301,77 @@ uint16_t squareValve1Pressure = 24;
 bool L2ValveReturnReservation = false;
 unsigned long L2ValveReturnTime = 0;
 
-//**********
+//*****番号によりシーケンス制御の動作を決める*****
 byte sequenceStep = 0;
+
+//*****シーケンス制御をやり始めたボタン（255で未選択）*****
 byte sequenceControlButton = 255;
+
+//*****弁1の圧力設定が予約中かどうか*****
 bool sequenceValve1PressurePending = false;
+
+//*****予約中の弁1の圧力値*****
 uint16_t sequenceValve1PendingPressure = 0; // 0.01MPa単位
+
+//*****弁3が予約中かどうか*****
 bool sequenceValve3Pending = false;
+
+//*****弁3を発射する時刻*****
 unsigned long sequenceValve3StartTime = 0;
+
+//*****発射し，装填要求を受け付けてよいか．弁1が発射されるとtrue，ボタン選択・装填開始・非常停止でfalse*****
 bool sequenceBackendReady = false;
 
+//*****L2で装填要求されたかどうか．予約されたらfalse*****
 bool sequenceBackendRequested = false;
+
+//*****弁3の発射が終わるのを待っているか*****
 bool sequenceAfterValve3Pending = false;
 
+//*****モーターを回しているか*****
 bool sequenceMotor_Running = false;
+
+//*****モーター始動が予約中か*****
 bool sequenceMotor_StartPending = false;
+
+//*****始動予約する時刻*****
 unsigned long sequenceMotor_StartTime = 0;
+
+//*****実際に始動した時刻*****
 unsigned long sequenceMotor_StartedTime = 0;
+
+//*****この時刻までリミットスイッチを読み飛ばす*****
 unsigned long sequenceMotor_LimitIgnoreUntil = 0;
+
+//*****押されていない状態を確認済みか*****
 bool sequenceMotor_CheckedLimitSWClosed = false;
+
+//*****リミットスイッチをあと何回読み飛ばすか*****
 byte sequenceMotor_LimitSWsToSkip = 1;
+
+//*****回転数を最後に送信した時間*****
 unsigned long sequenceMotor_LastSendTime = 0;
 
+//*****現在未使用*****
 bool sequenceValve5_On = false;
-bool sequenceValve5ReturnPending = false;
-bool sequenceMotor_ReturnPhase = false;
-bool sequenceMotor_Homing = false;
-bool sequenceMotor_PendingValveState = true;
-byte sequenceReloadCount = 0;
-unsigned long sequenceValve5ReturnTime = 0;
 
-//*****デバッグ記録用（AI生成）*****
-const int eepromLogCount = 292;                   // 保存できる件数
-const int eepromRecordSize = sizeof(AirEventLog); // 1件のバイト数（14になるはず）
-const int eepromDataStart = 2;                    // ログ領域の開始番地（先頭2バイトは書き込み位置の記録用）
-int eepromWriteIndex = 0;                         // 次に書き込む件数（0〜291を循環）
+//*****モーター停止後弁5をONにする予約が残っているか*****
+bool sequenceValve5ReturnPending = false;
+
+//*****「弁5をONにした瞬間->モーター動いて次のカセットへ」の間だけtrue*****
+bool sequenceMotor_ReturnPhase = false;
+
+//*****装填機構を原点に戻しているか*****
+bool sequenceMotor_Homing = false;
+
+//*****モーター始動を待つ時の弁5の状態*****
+bool sequenceMotor_PendingValve5State = true;
+
+//*****装填が何回終わったか*****
+byte sequenceReloadCount = 0;
+
+//*****弁5をONにする時刻*****
+unsigned long sequenceValve5ReturnTime = 0;
 
 /**************************************************************************************************/
 // 構造体初期化
@@ -479,7 +506,7 @@ bool copyWioData(void) {
       return true;
     } else {
       I2C_CrcErrorCount++;
-      Serial.print("crcErrorCount= ");
+      Serial.print(F("crcErrorCount= "));
       Serial.println(I2C_CrcErrorCount);
       return false;
     }
@@ -869,7 +896,6 @@ void writeValveOn(byte valveNum, unsigned int pulseLength) {
   if (valveNum >= totalValveNum) {
     return;
   } else {
-    logAirEvent(valveNum, true);
     reserveL2Valve(valveNum);
     pulseOn[valveNum] = true;
     pulseOffTime[valveNum] = millis() + pulseLength;
@@ -922,7 +948,6 @@ void pulseOn_OFF(void) {
 void checkBucket(void) {
   if (wioButtonClicked(btnBit_R2)) {
     pulseOn[Bucket] = !pulseOn[Bucket];
-    logAirEvent(Bucket, pulseOn[Bucket]);
     reserveL2Valve(Bucket);
   }
 }
@@ -947,24 +972,24 @@ void checkRegulatorPressureButtons(void) {
   }
 
   if (L1Pressed) {
-    if (selectedPressureMode == 0) {
+    if (selectedPressureMode == pressureModeCross) {
       p = &crossValve0Pressure;
-    } else if (selectedPressureMode == 1) {
+    } else if (selectedPressureMode == pressureModeCircle) {
       p = &circleValve0Pressure;
-    } else if (selectedPressureMode == 2) {
+    } else if (selectedPressureMode == pressureModeTriangle) {
       p = &triangleValve0Pressure;
-    } else if (selectedPressureMode == 3) {
+    } else if (selectedPressureMode == pressureModeSquare) {
       p = &squareValve0Pressure;
     }
   }
   if (R1Pressed) {
-    if (selectedPressureMode == 0) {
+    if (selectedPressureMode == pressureModeCross) {
       p = &crossValve1Pressure;
-    } else if (selectedPressureMode == 1) {
+    } else if (selectedPressureMode == pressureModeCircle) {
       p = &circleValve1Pressure;
-    } else if (selectedPressureMode == 2) {
+    } else if (selectedPressureMode == pressureModeTriangle) {
       p = &triangleValve1Pressure;
-    } else if (selectedPressureMode == 3) {
+    } else if (selectedPressureMode == pressureModeSquare) {
       p = &squareValve1Pressure;
     }
   }
@@ -994,14 +1019,14 @@ void checkSTARTButton(void) {
   }
   selectedPressureMode = (selectedPressureMode + 1) % 4; // 余りで番号を判別
 
-  if (selectedPressureMode == 0) {
-    Serial.println("PressureMode= CROSS");
-  } else if (selectedPressureMode == 1) {
-    Serial.println("PressureMode= CIRCLE");
-  } else if (selectedPressureMode == 2) {
-    Serial.println("PressureMode= TRIANGLE");
-  } else if (selectedPressureMode == 3) {
-    Serial.println("PressureMode= SQUARE");
+  if (selectedPressureMode == pressureModeCross) {
+    Serial.println(F("PressureMode= CROSS"));
+  } else if (selectedPressureMode == pressureModeCircle) {
+    Serial.println(F("PressureMode= CIRCLE"));
+  } else if (selectedPressureMode == pressureModeTriangle) {
+    Serial.println(F("PressureMode= TRIANGLE"));
+  } else if (selectedPressureMode == pressureModeSquare) {
+    Serial.println(F("PressureMode= SQUARE"));
   }
 }
 
@@ -1028,7 +1053,7 @@ bool sendRegulatorPressure(void) {
   float converted = regulatorPressure / 100.0f;
   uint8_t divided[4];
   memcpy(divided, &converted, sizeof(float));
-  byte data[8] = {0x04, divided[3], divided[2], divided[1], divided[0], 0, 0, 0};
+  byte data[8] = {regulatorCommand, divided[3], divided[2], divided[1], divided[0], 0, 0, 0};
 
   if (!canSendChecker(regulatorCanId, data)) {
     return false;
@@ -1038,7 +1063,7 @@ bool sendRegulatorPressure(void) {
   }
 }
 
-//*****なんの関数だ？*****
+//*****RPMをモーターに送る*****
 bool sendSequenceMotorRpm(int rpm) {
   if (!canReady) {
     return false;
@@ -1053,7 +1078,7 @@ bool sendSequenceMotorRpm(int rpm) {
   return canSendChecker(canId, data);
 }
 
-//*****名前一旦保留*****
+//*****リミットスイッチの状態を読む*****
 bool sequenceMotorLimitPressed(void) {
   return digitalRead(sequenceMotor_LimitSensePin);
 }
@@ -1103,7 +1128,15 @@ void checkSequenceControls(void) {
       (sequenceControlButton == btnBit_TRIANGLE && TRIANGLE_Clicked) ||
       (sequenceControlButton == btnBit_SQUARE && SQUARE_Clicked);
 
-  if (!sequenceValve3Pending && !pulseOn[sequenceValve0] && !pulseOn[sequenceValve1] && !pulseOn[sequenceValve3] && !sequenceBackendRequested && !sequenceAfterValve3Pending) {
+  if (!sequenceValve3Pending &&
+      !pulseOn[sequenceValve0] &&
+      !pulseOn[sequenceValve1] &&
+      !pulseOn[sequenceValve3] &&
+      !sequenceBackendRequested &&
+      !sequenceAfterValve3Pending &&
+      !sequenceMotor_Running &&
+      !sequenceMotor_StartPending &&
+      !sequenceValve5ReturnPending) {
 
     if (sequenceStep == 0) {
       if (CROSS_Clicked) {
@@ -1157,7 +1190,13 @@ void checkSequenceControls(void) {
 
 //*****「装填したい」になっていれば予約する*****
 void reserveReloadMotor(void) {
-  if (sequenceBackendReady && sequenceBackendRequested && !sequenceMotor_Running && !sequenceMotor_StartPending && !sequenceValve3Pending && !pulseOn[sequenceValve3]) {
+  if (sequenceBackendReady &&
+      sequenceBackendRequested &&
+      !sequenceMotor_Running &&
+      !sequenceMotor_StartPending &&
+      !sequenceValve3Pending &&
+      !pulseOn[sequenceValve3] &&
+      !sequenceValve5ReturnPending) {
     sequenceAfterValve3Pending = true;
     sequenceStep = 5;
     sequenceBackendReady = false;
@@ -1168,14 +1207,14 @@ void reserveReloadMotor(void) {
     sequenceAfterValve3Pending = false;
     sequenceValve1PressurePending = false;
     sequenceMotor_StartPending = true;
-    sequenceMotor_PendingValveState = false;
+    sequenceMotor_PendingValve5State = false;
     sequenceMotor_StartTime = millis() + sequenceMotor_AfterValve3Delay;
   }
 }
 
-//*****特定の時刻が来たらモーターを始動*****
+//*****条件がそろったらstartSequenceMotor()を呼ぶ*****
 void startReloading(void) {
-  if (sequenceMotor_StartPending && (pulseSent[sequenceValve5] == sequenceMotor_PendingValveState) && ((long)(millis() - sequenceMotor_StartTime) >= 0)) {
+  if (sequenceMotor_StartPending && (pulseSent[sequenceValve5] == sequenceMotor_PendingValve5State) && ((long)(millis() - sequenceMotor_StartTime) >= 0)) {
     sequenceMotor_StartPending = false;
     startSequenceMotor();
 
@@ -1208,12 +1247,12 @@ void reReserveReloadMotor(void) {
     pulseOn[sequenceValve5] = true;
     sequenceMotor_ReturnPhase = true;
     sequenceMotor_StartPending = true;
-    sequenceMotor_PendingValveState = true;
+    sequenceMotor_PendingValve5State = true;
     sequenceMotor_StartTime = millis() + sequenceMotor_AfterValve3Delay;
   }
 }
 
-//*****装填要求（仮）*****
+//*****装填要求，予約，始動，2回目の予約を毎周期呼ぶ*****
 void requestLoading(void) {
   bool L2_Clicked = wioButtonClicked(btnBit_L2);
   if (sequenceBackendReady && L2_Clicked) {
@@ -1225,7 +1264,7 @@ void requestLoading(void) {
   reReserveReloadMotor();
 }
 
-//*****復帰中だけ正転*****
+//*****復帰中だけ正転を返す*****
 int currentSequenceMotorRPM(void) {
   if (sequenceMotor_Homing) {
     return -sequenceMotor_RPM;
@@ -1262,7 +1301,7 @@ void observeSequenceMotor(void) {
   unsigned long now = millis();
 
   if (((unsigned long)(now - sequenceMotor_StartedTime) >= sequenceMotor_LimitSWCheckDelay) && ((long)(now - sequenceMotor_LimitIgnoreUntil) >= 0)) {
-    bool limitSW_Pressed = digitalRead(sequenceMotor_LimitSensePin);
+    bool limitSW_Pressed = sequenceMotorLimitPressed();
     if (!limitSW_Pressed) {
       sequenceMotor_CheckedLimitSWClosed = true;
     }
@@ -1294,7 +1333,7 @@ void observeSequenceMotor(void) {
               sequenceMotor_Homing = true;
               sequenceMotor_LimitSWsToSkip = 4;
               sequenceMotor_StartPending = true;
-              sequenceMotor_PendingValveState = false;
+              sequenceMotor_PendingValve5State = false;
               sequenceMotor_StartTime = now + sequenceMotor_AfterValve3Delay;
             } else {
               // １回目の装填
@@ -1310,7 +1349,7 @@ void observeSequenceMotor(void) {
       }
     }
   }
-  if ((long)(now - sequenceMotor_LastSendTime) >= sequenceMotor_SendInterval) {
+  if ((unsigned long)(now - sequenceMotor_LastSendTime) >= sequenceMotor_SendInterval) {
     if (sendSequenceMotorRpm(currentSequenceMotorRPM())) {
       sequenceMotor_LastSendTime = now;
     }
@@ -1411,25 +1450,6 @@ void ReSendAllZero(void) {
   }
 }
 
-//*****エアシリンダーのログを書き込む*****
-void logAirEvent(byte valveNum, bool state) {
-  AirEventLog log;
-  log.timestamp = millis();
-  log.valveNum = valveNum;
-  log.state = state ? 1 : 0;
-  log.buttonsState = controller.buttons;
-  log.rawButtons = lastRawButtonsState;
-
-  int address = eepromDataStart + eepromWriteIndex * eepromRecordSize;
-  EEPROM.put(address, log);
-
-  eepromWriteIndex++;
-  if (eepromWriteIndex >= eepromLogCount) {
-    eepromWriteIndex = 0;
-  }
-  EEPROM.put(0, eepromWriteIndex);
-}
-
 /**************************************************************************************************/
 // Setup
 /**************************************************************************************************/
@@ -1454,12 +1474,6 @@ void setup() {
   pinMode(sequenceMotor_LimitSensePin, INPUT_PULLUP);
   digitalWrite(sequenceMotor_LimitGroundPin, LOW);
   pinMode(sequenceMotor_LimitGroundPin, OUTPUT);
-
-  // デバッグ記録用初期化
-  EEPROM.get(0, eepromWriteIndex);
-  if (eepromWriteIndex < 0 || eepromWriteIndex >= eepromLogCount) {
-    eepromWriteIndex = 0;
-  }
 
   lastDisconnectTime = millis() - needSHAREButtonTime;
   lastWioReceiveTime = millis() - wioLinkTimeout;
