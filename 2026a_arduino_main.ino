@@ -3,6 +3,7 @@
 #include <avr/wdt.h>
 #include <mcp_can.h>
 #include <string.h>
+#include <util/atomic.h>
 
 /**************************************************************************************************/
 // 構造体定義
@@ -54,27 +55,32 @@ struct __attribute__((packed)) ControllerPacket {
 
 //*****wio関係*****
 const uint8_t wioAddress = 0x14;
-const byte receiveBufferSize = 11;
+
+//*****I2C関係*****
+const byte I2C_OperationFrameSize = 11;
+const byte I2C_ControllerDataSize = 10;
+const byte tenKeyFrameCapacity = 8;
 
 //*****ボタンのビット番号*****
 const byte btnBit_CROSS = 0;
 const byte btnBit_CIRCLE = 1;
 const byte btnBit_SQUARE = 2;
 const byte btnBit_TRIANGLE = 3;
-const byte btnBit_UP = 4;
-const byte btnBit_DOWN = 5;
-const byte btnBit_LEFT = 6;
-const byte btnBit_RIGHT = 7;
+const byte btnBit_LEFT = 4;
+const byte btnBit_RIGHT = 5;
+const byte btnBit_UP = 6;
+const byte btnBit_DOWN = 7;
 const byte btnBit_L1 = 8;
 const byte btnBit_R1 = 9;
-const byte btnBit_L3 = 10;
-const byte btnBit_R3 = 11;
-const byte btnBit_L2 = 12;
-const byte btnBit_R2 = 13;
-const byte btnBit_SHARE = 14;
-const byte btnBit_START = 15;
+const byte btnBit_L2 = 10;
+const byte btnBit_R2 = 11;
+const byte btnBit_SHARE = 12;
+const byte btnBit_START = 13;
+const byte btnBit_L3 = 14;
+const byte btnBit_R3 = 15;
 const byte btnBit_PS = 16;
-const byte btnBit_MUTE = 17;
+const byte btnBit_TOUCHPAD = 17;
+const byte btnBit_MIC = 18;
 
 //*****エアシリンダーが自動で戻る間隔*****
 const unsigned int pulseStopInterval = 500;
@@ -135,9 +141,6 @@ const unsigned long needSHAREButtonTime = 1000;
 
 //*****wioタイムアウト*****
 const unsigned long wioLinkTimeout = 400;
-
-//*****何Hzで読みに行くか*****
-const unsigned long wioRequestInterval = 33;
 
 //*****弁7を一瞬切る間隔*****
 const unsigned long L2ValveOffDuration = 200;
@@ -264,18 +267,10 @@ unsigned long lastDisconnectReportTime = 0;
 // 最後に受け取った時間
 unsigned long lastWioReceiveTime = 0;
 
-unsigned long lastWioRequestTime = 0;
-
 uint32_t lastButtonsState = 0;
 
 unsigned long lastLoopStartTime = 0;
 unsigned long maxLoopDuration = 0;
-
-byte I2CBuffer[receiveBufferSize] = {0};
-
-unsigned long I2C_OKCount = 0;
-unsigned long I2C_NGCount = 0;
-unsigned long I2C_CrcErrorCount = 0;
 
 uint32_t lastRawButtonsState = 0;
 
@@ -373,6 +368,22 @@ byte sequenceReloadCount = 0;
 //*****弁5をONにする時刻*****
 unsigned long sequenceValve5ReturnTime = 0;
 
+//*****I2Cで送られてきたデータを格納*****
+volatile byte pendingControllerData[10] = {0};
+volatile bool pendingControllerFrame = false;
+
+volatile byte tenKeyFrameQueue[8][10] = {0};
+volatile byte tenKeyQueueHead = 0;
+volatile byte tenKeyQueueTail = 0;
+volatile byte tenKeyQueueCount = 0;
+
+volatile uint32_t I2C_ControllerFrames = 0;
+volatile uint32_t I2C_IgnoredFrames = 0;
+volatile uint32_t I2C_InvalidFrames = 0;
+volatile uint32_t I2C_tenKeyDroppedFrames = 0;
+
+byte robotStateForBridge[10] = {0};
+
 /**************************************************************************************************/
 // 構造体初期化
 /**************************************************************************************************/
@@ -424,9 +435,6 @@ bool pulseOn[totalValveNum] = {false};
 bool pulseSent[totalValveNum] = {false};
 unsigned long pulseOffTime[totalValveNum] = {0};
 
-//*****各ビットに対応*****
-const byte bitIndex[18] = {13, 14, 12, 15, 255, 255, 255, 255, 16, 17, 22, 23, 18, 19, 20, 21, 24, 26};
-
 /**************************************************************************************************/
 // 関数
 /**************************************************************************************************/
@@ -464,6 +472,96 @@ bool wioButtonClicked(byte bit) {
   }
 }
 
+//*****I2C受信*****
+void receiveI2CEvent(int howMany) {
+  bool tooLong = false;
+  byte size = 0;
+  byte frame[I2C_OperationFrameSize] = {0};
+
+  while (Wire.available()) {
+    if (size < I2C_OperationFrameSize) {
+      frame[size] = Wire.read();
+      size++;
+    } else {
+      tooLong = true;
+    }
+  }
+
+  if ((howMany != I2C_OperationFrameSize) || tooLong || size != 11) {
+    I2C_InvalidFrames++;
+    return;
+  }
+
+  if (frame[0] == 0x01) {
+    if (tenKeyQueueCount >= tenKeyFrameCapacity) {
+      I2C_tenKeyDroppedFrames++;
+      return;
+    }
+    for (int i = 0; i < I2C_ControllerDataSize; i++) {
+      tenKeyFrameQueue[tenKeyQueueTail][i] = frame[i + 1];
+    }
+    tenKeyQueueTail++;
+    if (tenKeyQueueTail == tenKeyFrameCapacity) {
+      tenKeyQueueTail = 0;
+    }
+    tenKeyQueueCount++;
+    I2C_IgnoredFrames++;
+    return;
+  }
+  if (frame[0] != 0x02) {
+    I2C_InvalidFrames++;
+    return;
+  } else {
+    for (int i = 0; i < I2C_ControllerDataSize; i++) {
+      pendingControllerData[i] = frame[i + 1];
+    }
+    pendingControllerFrame = true;
+    I2C_ControllerFrames++;
+  }
+}
+
+void requestI2CEvent(void) {
+  Wire.write(robotStateForBridge, sizeof(robotStateForBridge));
+}
+
+bool consumeI2CControllerFrame(void) {
+  byte snapshot[10] = {0};
+  bool ready = false;
+
+  ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
+    if (pendingControllerFrame) {
+      for (int i = 0; i < I2C_ControllerDataSize; i++) {
+        snapshot[i] = pendingControllerData[i];
+      }
+      pendingControllerFrame = false;
+      ready = true;
+    }
+  }
+  if (ready) {
+    memcpy(&controller, snapshot, sizeof(controller));
+  }
+  return ready;
+}
+
+bool popTenKeyFrame(byte *frame) {
+  bool ready = false;
+
+  ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
+    if (tenKeyQueueCount >= 1) {
+      for (int i = 0; i < I2C_ControllerDataSize; i++) {
+        frame[i] = tenKeyFrameQueue[tenKeyQueueHead][i];
+      }
+      tenKeyQueueHead++;
+      tenKeyQueueCount--;
+      if (tenKeyQueueHead == tenKeyFrameCapacity) {
+        tenKeyQueueHead = 0;
+      }
+      ready = true;
+    }
+  }
+  return ready;
+}
+
 //*****チェックサム関数*****
 uint8_t calcCrc(const uint8_t data[10]) {
   uint8_t crc = 0xFF;
@@ -478,39 +576,6 @@ uint8_t calcCrc(const uint8_t data[10]) {
     }
   }
   return crc;
-}
-
-//*****受け取ったデータをバッファにコピー*****
-bool copyWioData(void) {
-  byte receiveBytes = Wire.requestFrom(wioAddress, receiveBufferSize);
-  if (receiveBytes != receiveBufferSize) {
-    I2C_NGCount++;
-    Serial.print(F("Expected= "));
-    Serial.println(receiveBufferSize);
-    Serial.print(F("receiveBytes= "));
-    Serial.println(receiveBytes);
-    Serial.print(F("I2C_OK= "));
-    Serial.println(I2C_OKCount);
-    Serial.print(F("I2C_NG= "));
-    Serial.println(I2C_NGCount);
-    return false;
-  } else {
-    for (int i = 0; i < receiveBytes; i++) {
-      if (Wire.available()) {
-        I2CBuffer[i] = Wire.read();
-      }
-    }
-    byte calculated = calcCrc(I2CBuffer);
-    if (calculated == I2CBuffer[10]) {
-      I2C_OKCount++;
-      return true;
-    } else {
-      I2C_CrcErrorCount++;
-      Serial.print(F("crcErrorCount= "));
-      Serial.println(I2C_CrcErrorCount);
-      return false;
-    }
-  }
 }
 
 //*****canId共通関数*****
@@ -1460,8 +1525,10 @@ void setup() {
   wdt_enable(WDTO_2S);
 
   Serial.begin(115200);
-  Wire.begin();
-  Wire.setWireTimeout(25000, true);
+  Wire.begin(wioAddress);
+  Wire.onReceive(receiveI2CEvent);
+  Wire.onRequest(requestI2CEvent);
+  // この二行は削除検討
   digitalWrite(SDA, LOW);
   digitalWrite(SCL, LOW);
 
@@ -1537,53 +1604,29 @@ void loop() {
   }
 
   wdt_reset();
-  if ((unsigned long)(millis() - lastWioRequestTime) >= wioRequestInterval) {
-    lastWioRequestTime = millis();
-    if (copyWioData()) {
-      memcpy((void *)&controller, (const void *)I2CBuffer, sizeof(controller));
-      lastWioReceiveTime = millis();
-      uint32_t rawValue = controller.buttons;
-      uint32_t converted = 0;
-      byte HATValue = (rawValue >> 9) & 0b111;
 
-      for (int i = 0; i < 18; i++) {
-        if (bitIndex[i] == 255) {
-          continue;
-        } else {
-          if ((rawValue >> bitIndex[i]) & 1) {
-            converted |= (unsigned long)1 << i;
-          }
-        }
-      }
-      if (HATValue == 0b00) {
-        converted |= (unsigned long)1 << 4;
-      } else if (HATValue == 0b01) {
-        converted |= (unsigned long)1 << 7;
-      } else if (HATValue == 0b10) {
-        converted |= (unsigned long)1 << 5;
-      } else if (HATValue == 0b11) {
-        converted |= (unsigned long)1 << 6;
-      }
-      controller.buttons = converted;
+  if (consumeI2CControllerFrame()) {
+    lastWioReceiveTime = millis();
+    uint32_t rawValue = controller.buttons;
 
-      if (!bitRead(lastRawButtonsState, btnBit_SQUARE)) {
-        bitClear(controller.buttons, btnBit_SQUARE);
-      }
-      if (!bitRead(lastRawButtonsState, btnBit_CIRCLE)) {
-        bitClear(controller.buttons, btnBit_CIRCLE);
-      }
-      if (!bitRead(lastRawButtonsState, btnBit_TRIANGLE)) {
-        bitClear(controller.buttons, btnBit_TRIANGLE);
-      }
-      if (!bitRead(lastRawButtonsState, btnBit_CROSS)) {
-        bitClear(controller.buttons, btnBit_CROSS);
-      }
-      if (!bitRead(lastRawButtonsState, btnBit_R2)) {
-        bitClear(controller.buttons, btnBit_R2);
-      }
-      lastRawButtonsState = converted;
+    if (!bitRead(lastRawButtonsState, btnBit_SQUARE)) {
+      bitClear(controller.buttons, btnBit_SQUARE);
     }
+    if (!bitRead(lastRawButtonsState, btnBit_CIRCLE)) {
+      bitClear(controller.buttons, btnBit_CIRCLE);
+    }
+    if (!bitRead(lastRawButtonsState, btnBit_TRIANGLE)) {
+      bitClear(controller.buttons, btnBit_TRIANGLE);
+    }
+    if (!bitRead(lastRawButtonsState, btnBit_CROSS)) {
+      bitClear(controller.buttons, btnBit_CROSS);
+    }
+    if (!bitRead(lastRawButtonsState, btnBit_R2)) {
+      bitClear(controller.buttons, btnBit_R2);
+    }
+    lastRawButtonsState = rawValue;
   }
+
   canRetry();
   if (regulatorPressurePending) {
     sendRegulatorPressure();
